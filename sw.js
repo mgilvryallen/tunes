@@ -31,15 +31,18 @@ self.addEventListener('fetch', event => {
     if (event.request.method !== 'GET' || !event.request.url.startsWith(self.location.origin)) return;
 
     // The page itself comes from the network first, so a new version shows on the next open
-    // (not the one after). Offline, or on a signal too slow to answer in 3s, the cached copy opens.
+    // (not the one after). Offline, on wifi that goes nowhere, or on a signal too slow to answer
+    // in 3s, the cached copy opens. Anything but a straight answer (an error, or a wifi login page
+    // redirecting) counts as no answer, so it never replaces the cached copy.
     if (event.request.mode === 'navigate') {
         event.respondWith(
             caches.open(CACHE).then(cache => {
                 const fresh = fetch(event.request).then(response => {
-                    if (response.ok) cache.put(event.request, response.clone());
+                    if (!response.ok || response.redirected) throw new Error('not the page');
+                    cache.put(event.request, response.clone());
                     return response;
                 });
-                const cached = () => cache.match(event.request, { ignoreSearch: true }).then(hit => hit || fresh);
+                const cached = () => cache.match(event.request, { ignoreSearch: true }).then(hit => hit || fetch(event.request));
                 const slow = new Promise(resolve => setTimeout(resolve, 3000)).then(cached);
                 return Promise.race([fresh.catch(cached), slow]);
             })
