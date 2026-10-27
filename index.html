@@ -754,6 +754,49 @@
             min-height: 34px;
         }
 
+        .chords-edit {
+            margin-left: auto;
+            font-size: 14px;
+        }
+
+        .chord-grid {
+            margin-top: 10px;
+        }
+
+        .chord-grid .field-hint {
+            margin-bottom: 6px;
+        }
+
+        .chord-grid .chord-bars button {
+            padding: 6px 8px;
+            border: none;
+            border-right: 1px solid var(--light-tan);
+            border-bottom: 1px solid var(--light-tan);
+            background: transparent;
+            text-align: left;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            font-weight: 600;
+            font-size: 15px;
+            color: var(--heading);
+            min-height: 38px;
+            cursor: pointer;
+        }
+
+        .chord-grid .chord-bars button:hover {
+            background: var(--parchment);
+        }
+
+        .chord-shift {
+            display: flex;
+            justify-content: space-between;
+            margin: -2px 0 10px 26px;
+        }
+
+        .chord-shift .link-btn {
+            font-size: 13px;
+            padding: 0;
+        }
+
         .chord-input {
             font-family: ui-monospace, Menlo, monospace;
             font-size: 14px;
@@ -1284,8 +1327,10 @@
             </div>
             <div class="input-group">
                 <label for="fChords">Chords</label>
-                <textarea id="fChords" class="chord-input" maxlength="2000" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="D D G A&#10;D D A AD&#10;&#10;G G D D&#10;G G A D"></textarea>
+                <textarea id="fChords" class="chord-input" maxlength="2000" autocapitalize="off" autocorrect="off" spellcheck="false" oninput="renderChordGrid()" placeholder="D D G A&#10;D D A AD&#10;&#10;G G D D&#10;G G A D"></textarea>
                 <p class="field-hint">Spaces between bars. Run two chords together to share a bar (AD). A blank line starts the next&nbsp;part.</p>
+                <p class="field-hint chords-from" id="chordsFrom" hidden>These came from the sheet music. Change anything; saving keeps your&nbsp;version.</p>
+                <div class="chord-grid" id="chordGrid"></div>
                 <button class="link-btn chords-copy" onclick="copyChordsFromDots()">copy the chords from the sheet music</button>
             </div>
             <div class="input-group">
@@ -2015,13 +2060,13 @@
         // Editing from a tune page (maybe opened from a set) comes back to where you were
         let editorReturn = null;
 
-        function editFromPage(tuneId) {
+        function editFromPage(tuneId, focus) {
             const setOpen = !document.getElementById('setView').hidden;
             editorReturn = { tune: tuneId, set: setOpen && viewingSet ? viewingSet.id : null };
             document.getElementById('tunePage').hidden = true;
             if (setOpen) document.getElementById('setView').hidden = true;
             document.body.style.overflow = '';
-            openEditor(tuneId);
+            openEditor(tuneId, focus);
         }
 
         function returnFromEditor() {
@@ -2411,6 +2456,7 @@
             renderEditorTunings();
             document.getElementById('fAuthor').value = t.author || '';
             document.getElementById('fChords').value = t.chords || '';
+            document.getElementById('chordsFrom').hidden = true;
             document.getElementById('fLink').value = t.link || '';
             document.getElementById('fNotes').value = t.notes || '';
             editorStatus = t.status;
@@ -2806,6 +2852,8 @@
 
         // Everything attached to the tune: Session settings, pasted ABC, photos
         function renderSessionLinked() {
+            fillChordsFromDots();
+            renderChordGrid();
             const linked = document.getElementById('sessionLinked');
             linked.hidden = !editorLinks.length && !editorPhotos.length;
             linked.innerHTML = editorLinks.map((link, i) =>
@@ -2974,29 +3022,72 @@
             return [...String(abc || '').matchAll(/"([^"]+)"/g)].some(m => CHORD.test(m[1]));
         }
 
+        // How long a stretch of ABC lasts, in the tune's own note lengths: G is 1, G3 is 3, G/ is
+        // a half. (Counting notes instead would take a bar of two long notes for a pickup.)
+        function lengthIn(text) {
+            const clean = text.replace(/"[^"]*"/g, '').replace(/![^!]*!/g, '').replace(/\[[A-Za-z]:[^\]]*\]/g, '');
+            let total = 0;
+            for (const m of clean.matchAll(/[\^_=]*[A-Ga-gz][,']*(\d*)(\/*)(\d*)/g)) {
+                const top = m[1] ? Number(m[1]) : 1;
+                const bottom = m[3] ? Number(m[3]) : Math.pow(2, m[2].length);
+                total += top / bottom;
+            }
+            return total;
+        }
+
         // Bar-by-bar chords from ABC, split into parts where the repeats and double bars are
         function chordsFromAbc(abc) {
             const body = abc.split('\n').filter(l => l.trim() && !/^[A-Za-z]:/.test(l)).join(' ');
             const parts = body.split(/(\[\||\|\]|::|:*\|+:*)/);
-            // Pickups (into either part) are short bars: under half the usual number of notes
-            const counts = parts.filter((_, i) => i % 2 === 0).map(notesIn).filter(n => n > 0).sort((a, b) => a - b);
+            // Pickups (into either part) are short bars: under half the usual length
+            const counts = parts.filter((_, i) => i % 2 === 0).map(lengthIn).filter(n => n > 0).sort((a, b) => a - b);
             const usual = counts[Math.floor(counts.length / 2)] || 0;
             const result = [];
             let current = { label: 'A', bars: [] };
             let last = '';
+            // First and second endings are the same bar of the part, played on different passes:
+            // the second ending's chords join the first's ("1.A 2.D") rather than taking a bar of
+            // their own, which would push everything after it over by one
+            let firstEnding = [];  // where the first-ending bars sit in current.bars
+            let ending = 0;        // which ending we're in, 0 for none
+            let secondCount = 0;
+            const close = () => {
+                result.push(current);
+                current = { label: String.fromCharCode(65 + result.length), bars: [] };
+                firstEnding = [];
+                ending = 0;
+                secondCount = 0;
+            };
             for (let i = 0; i < parts.length; i += 2) {
                 const content = parts[i];
                 const bar = parts[i + 1] || '';
-                if (notesIn(content) > 0 && notesIn(content) >= usual / 2) {
+                const marked = content.match(/^\s*\[?([1-9])/);
+                if (marked) ending = Number(marked[1]);
+                if (lengthIn(content) > 0 && lengthIn(content) >= usual / 2) {
                     const chords = [...content.matchAll(/"([^"]+)"/g)].map(m => m[1].trim()).filter(c => CHORD.test(c));
-                    current.bars.push(chords.length ? chords.join(' ') : (last ? '·' : ''));
+                    const text = chords.length ? chords.join(' ') : (last ? '·' : '');
                     if (chords.length) last = chords[chords.length - 1];
+                    if (ending >= 2 && secondCount < firstEnding.length) {
+                        const at = firstEnding[secondCount++];
+                        const first = current.bars[at];
+                        if (text && text !== '·' && text !== first) current.bars[at] = `1.${first} 2.${text}`;
+                    } else {
+                        if (ending === 1) firstEnding.push(current.bars.length);
+                        current.bars.push(text);
+                    }
                 }
-                // An end repeat or a double bar closes a part
-                if (current.bars.length && /:\||\|\||\|\]|::/.test(bar)) {
-                    result.push(current);
-                    current = { label: String.fromCharCode(65 + result.length), bars: [] };
+                // An end repeat or a double bar closes a part, except the repeat at the end of a
+                // first ending: the second ending still belongs to this part
+                const closes = /:\||\|\||\|\]|::/.test(bar);
+                if (ending === 1 && closes) {
+                    ending = 0;
+                    continue;
                 }
+                if (ending >= 2 && secondCount >= firstEnding.length) {
+                    close();
+                    continue;
+                }
+                if (current.bars.length && closes && ending < 2) close();
             }
             if (current.bars.length) result.push(current);
             return result.filter(p => p.bars.some(b => b && b !== '·'));
@@ -3070,7 +3161,7 @@
             }
             return `
                 <div class="chord-chart">
-                    <div class="chord-head"><span class="sub-label">Chords</span><span class="chip-key">from ${escapeHTML(chart.from)}</span></div>
+                    <div class="chord-head"><span class="sub-label">Chords</span><span class="chip-key">from ${escapeHTML(chart.from)}</span><button class="link-btn chords-edit" onclick="editFromPage('${tune.id}', 'chords')">edit</button></div>
                     ${chart.parts.map(p => `
                         <div class="chord-part">
                             ${p.label ? `<span class="chord-label">${escapeHTML(p.label)}</span>` : ''}
@@ -3109,7 +3200,62 @@
                 alert('None of the sheet music on this tune has chords in it yet.');
                 return;
             }
+            if (document.getElementById('fChords').value.trim() && !confirm('Replace the chords in the box with the ones from the sheet music?')) return;
             document.getElementById('fChords').value = chordText(chordsFromAbc(link.abc));
+            document.getElementById('chordsFrom').hidden = false;
+            renderChordGrid();
+        }
+
+        // With no chart of its own yet, the editor starts from the sheet music's chords, so
+        // they can be fixed rather than typed out again
+        function fillChordsFromDots() {
+            const box = document.getElementById('fChords');
+            const link = editorLinks.find(l => hasChords(l.abc));
+            if (box.value.trim() || !link) return;
+            box.value = chordText(chordsFromAbc(link.abc));
+            document.getElementById('chordsFrom').hidden = false;
+        }
+
+        // The chart as bars you can tap: tap a bar to change its chords, and the arrows slide a
+        // whole part one bar left or right (the bar that falls off one end comes round to the
+        // other), for when the chords landed a bar early or late
+        function editorChordParts() {
+            return parseChordText(document.getElementById('fChords').value);
+        }
+
+        function writeChordParts(parts) {
+            document.getElementById('fChords').value = chordText(parts);
+            renderChordGrid();
+        }
+
+        function renderChordGrid() {
+            const parts = editorChordParts();
+            document.getElementById('chordGrid').innerHTML = (parts.length ? '<p class="field-hint">Tap a bar to change it.</p>' : '') + parts.map((p, i) => `
+                <div class="chord-part">
+                    ${p.label ? `<span class="chord-label">${escapeHTML(p.label)}</span>` : ''}
+                    <div class="chord-bars">${p.bars.map((b, j) => `<button type="button" onclick="editChordBar(${i}, ${j})" aria-label="Bar ${j + 1}: ${escapeHTML(b)}">${escapeHTML(b)}</button>`).join('')}</div>
+                </div>
+                <div class="chord-shift">
+                    <button type="button" class="link-btn" onclick="shiftChordPart(${i}, -1)">‹ slide ${p.label ? escapeHTML(p.label) + ' ' : ''}left</button>
+                    <button type="button" class="link-btn" onclick="shiftChordPart(${i}, 1)">slide ${p.label ? escapeHTML(p.label) + ' ' : ''}right ›</button>
+                </div>`).join('');
+        }
+
+        function shiftChordPart(i, direction) {
+            const parts = editorChordParts();
+            const bars = parts[i].bars;
+            if (direction < 0) bars.push(bars.shift());
+            else bars.unshift(bars.pop());
+            writeChordParts(parts);
+        }
+
+        function editChordBar(i, j) {
+            const parts = editorChordParts();
+            const now = parts[i].bars[j];
+            const text = prompt(`Bar ${j + 1}${parts[i].label ? ' of ' + parts[i].label : ''}: chords (two in a bar: "A D"; blank to hold the last one)`, now === '·' ? '' : now);
+            if (text === null) return;
+            parts[i].bars[j] = text.trim() ? text.trim().split(/\s+/).map(splitBar).join(' ') : '·';
+            writeChordParts(parts);
         }
 
         // ---- Quick add ----
