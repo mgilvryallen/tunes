@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" fill="#f7f3e9"/>
+  <rect x="4" y="4" width="56" height="56" rx="11" fill="none" stroke="#4a3f2f" stroke-width="1.6"/>
+  <rect x="7.5" y="7.5" width="49" height="49" rx="8" fill="none" stroke="#8b7759" stroke-width="0.9"/>
+  <g fill="#3d5a42"><circle cx="12.6" cy="12.6" r="1.4"/><circle cx="51.4" cy="12.6" r="1.4"/><circle cx="12.6" cy="51.4" r="1.4"/><circle cx="51.4" cy="51.4" r="1.4"/></g>
+  <g fill="#8b7759"><path d="M12.6 29.4 l2 2.6 l-2 2.6 l-2 -2.6 Z"/><path d="M51.4 29.4 l2 2.6 l-2 2.6 l-2 -2.6 Z"/></g>
+  <rect x="17.5" y="14" width="29" height="37" rx="2" fill="#a0522d" stroke="#4a3f2f" stroke-width="1"/>
+  <rect x="17.5" y="14" width="5" height="37" rx="1.5" fill="#4a3f2f"/>
+  <rect x="26.5" y="21" width="15.5" height="12" rx="1" fill="#f7f3e9"/>
+  <line x1="28.5" x2="40" y1="24" y2="24" stroke="#8b7759" stroke-width="0.8"/><line x1="28.5" x2="40" y1="26.5" y2="26.5" stroke="#8b7759" stroke-width="0.8"/><line x1="28.5" x2="40" y1="29" y2="29" stroke="#8b7759" stroke-width="0.8"/><line x1="28.5" x2="40" y1="31.5" y2="31.5" stroke="#8b7759" stroke-width="0.8"/>
+  <g transform="rotate(-18 33 28.5)"><ellipse cx="33" cy="28.5" rx="1.6" ry="1.15" fill="#4a3f2f"/></g><rect x="34.2" y="23" width="0.8" height="5.5" fill="#4a3f2f"/>
+  <path d="M38 51 V56 L40 54.3 L42 56 V51 Z" fill="#3d5a42"/>
+</svg>
