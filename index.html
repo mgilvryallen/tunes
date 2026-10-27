@@ -736,11 +736,15 @@
             padding-top: 6px;
         }
 
-        .chord-bars {
+        .chord-rows {
             flex: 1;
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
             border-left: 2px solid var(--heading);
+        }
+
+        /* Each row is its own grid: four bars usually, more on a crooked part's last row */
+        .chord-bars {
+            display: grid;
+            grid-template-columns: repeat(var(--bars, 4), 1fr);
         }
 
         .chord-bars span {
@@ -3135,10 +3139,25 @@
             return filled;
         }
 
+        // Bars in rows of four, but a new row only starts when there are four bars to fill it:
+        // a crooked part's extra bars go on its last row (9 bars is 4 + 5, 12 is three rows)
+        function barRows(bars) {
+            const count = Math.max(1, Math.floor(bars.length / 4));
+            const rows = [];
+            for (let i = 0; i < count; i++) rows.push(bars.slice(i * 4, i === count - 1 ? bars.length : i * 4 + 4));
+            return rows;
+        }
+
+        function barRowsHtml(bars, cell) {
+            let at = 0;
+            return `<div class="chord-rows">${barRows(bars).map(row =>
+                `<div class="chord-bars" style="--bars: ${row.length}">${row.map(b => cell(b, at++)).join('')}</div>`
+            ).join('')}</div>`;
+        }
+
         function chordText(parts) {
             return parts.map(p => {
-                const rows = [];
-                for (let i = 0; i < p.bars.length; i += 4) rows.push(p.bars.slice(i, i + 4).join(' | '));
+                const rows = barRows(p.bars).map(row => row.join(' | '));
                 return `${p.label ? p.label + ': ' : ''}${rows.join('\n' + ' '.repeat(p.label ? p.label.length + 2 : 0))}`;
             }).join('\n');
         }
@@ -3163,7 +3182,7 @@
                     ${chart.parts.map(p => `
                         <div class="chord-part">
                             ${p.label ? `<span class="chord-label">${escapeHTML(p.label)}</span>` : ''}
-                            <div class="chord-bars">${p.bars.map(b => `<span>${escapeHTML(b)}</span>`).join('')}</div>
+                            ${barRowsHtml(p.bars, b => `<span>${escapeHTML(b)}</span>`)}
                         </div>`).join('')}
                 </div>`;
         }
@@ -3231,7 +3250,7 @@
             document.getElementById('chordGrid').innerHTML = (parts.length ? '<p class="field-hint">Tap a bar to change it.</p>' : '') + parts.map((p, i) => `
                 <div class="chord-part">
                     ${p.label ? `<span class="chord-label">${escapeHTML(p.label)}</span>` : ''}
-                    <div class="chord-bars">${p.bars.map((b, j) => `<button type="button" onclick="editChordBar(${i}, ${j})" aria-label="Bar ${j + 1}: ${escapeHTML(b)}">${escapeHTML(b)}</button>`).join('')}</div>
+                    ${barRowsHtml(p.bars, (b, j) => `<button type="button" onclick="editChordBar(${i}, ${j})" aria-label="Bar ${j + 1}: ${escapeHTML(b)}">${escapeHTML(b)}</button>`)}
                 </div>
                 <div class="chord-shift">
                     <button type="button" class="link-btn" onclick="shiftChordPart(${i}, -1)">‹ slide ${p.label ? escapeHTML(p.label) + ' ' : ''}left</button>
