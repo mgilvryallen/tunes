@@ -1591,7 +1591,8 @@
         }
 
         function droneLink(key) {
-            return `../drone/#key=${encodeURIComponent(KEY_PARAMS[key])}`;
+            // from=tunes gives Drone a way back here
+            return `../drone/#key=${encodeURIComponent(KEY_PARAMS[key])}&from=tunes`;
         }
 
         function options(list, selected, labels) {
