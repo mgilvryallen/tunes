@@ -3045,9 +3045,11 @@
             const result = [];
             let current = { label: 'A', bars: [] };
             let last = '';
-            // First and second endings are the same bar of the part, played on different passes:
-            // the second ending's chords join the first's ("1.A 2.D") rather than taking a bar of
-            // their own, which would push everything after it over by one
+            // First and second endings are the same bars of the part, played on different passes:
+            // each second-ending bar's chords join the matching first-ending bar's ("1.A 2.D")
+            // rather than taking a bar of their own, which would push everything after over by
+            // one. Parts can be any length (crooked tunes), and if the second ending runs longer
+            // than the first, its extra bars just carry on the part.
             let firstEnding = [];  // where the first-ending bars sit in current.bars
             let ending = 0;        // which ending we're in, 0 for none
             let secondCount = 0;
@@ -3076,18 +3078,14 @@
                         current.bars.push(text);
                     }
                 }
-                // An end repeat or a double bar closes a part, except the repeat at the end of a
-                // first ending: the second ending still belongs to this part
-                const closes = /:\||\|\||\|\]|::/.test(bar);
+                // An end repeat, a double bar or a new start repeat closes a part, except the
+                // repeat at the end of a first ending: the second ending still belongs to this part
+                const closes = /:\||\|\||\|\]|::|\|:/.test(bar);
                 if (ending === 1 && closes) {
                     ending = 0;
                     continue;
                 }
-                if (ending >= 2 && secondCount >= firstEnding.length) {
-                    close();
-                    continue;
-                }
-                if (current.bars.length && closes && ending < 2) close();
+                if (current.bars.length && closes) close();
             }
             if (current.bars.length) result.push(current);
             return result.filter(p => p.bars.some(b => b && b !== '·'));
