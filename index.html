@@ -2196,24 +2196,34 @@
         }
 
         // Re-flows the body of an ABC tune into lines of `perLine` bars, keeping repeat signs,
-        // endings and any pickup in their right places
+        // endings and any pickup in their right places. Every part starts on a new line: a line
+        // ends where a part does (an end repeat, a double bar, a new start repeat), though not at
+        // the repeat closing a first ending, since the second ending belongs to the same part.
         function reflow(body, perLine) {
             const parts = body.split(/(\[\||\|\]|::|:*\|+:*)/);
             const contents = parts.filter((_, i) => i % 2 === 0);
-            const firstBar = contents.findIndex(c => notesIn(c) > 0);
-            const nextBar = contents.findIndex((c, i) => i > firstBar && notesIn(c) > 0);
-            const pickup = firstBar >= 0 && nextBar > 0 && notesIn(contents[firstBar]) < notesIn(contents[nextBar]) / 2;
+            // Short bars (pickups into a part, and the bars they complete) don't count toward a line
+            const lengths = contents.map(lengthIn).filter(n => n > 0).sort((a, b) => a - b);
+            const usual = lengths[Math.floor(lengths.length / 2)] || 0;
             const lines = [];
             let line = '';
             let count = 0;
+            let ending = 0; // 1 inside a first ending; -1 just after one, waiting for the second
             for (let i = 0; i < parts.length; i += 2) {
                 const content = parts[i];
                 const bar = parts[i + 1] || '';
+                const marked = content.match(/^\s*\[?(\d)/);
+                if (ending === -1 && !marked && lengthIn(content) > 0) ending = 0;
+                if (marked) ending = Number(marked[1]);
                 // A new line that opens on a first/second ending needs the bracket form
-                line += /^\s*\d/.test(content) && line === '' && lines.length ? '[' + content.trimStart() : content;
-                if (notesIn(content) > 0 && !(pickup && i / 2 === firstBar)) count++;
+                line += marked && line === '' && lines.length ? '[' + content.trimStart() : content;
+                if (lengthIn(content) >= usual / 2 && lengthIn(content) > 0) count++;
+                const closes = /:\||\|\||\|\]|::|\|:/.test(bar);
+                const partEnds = closes && ending !== 1;
+                if (closes) ending = ending === 1 ? -1 : 0;
                 const moreToCome = parts.slice(i + 2).some((p, j) => j % 2 === 0 && notesIn(p) > 0);
-                if (count >= perLine && bar && moreToCome) {
+                // (a pickup on its own, before a start repeat, stays with the bars it leads into)
+                if ((count >= perLine || (partEnds && count > 0)) && bar && moreToCome) {
                     // A start-repeat belongs at the start of the next line
                     const opens = /\|:+$/.test(bar) || bar === '::';
                     lines.push(line + (opens ? bar.replace(/:+$/, '').replace(/^::$/, ':|') : bar));
