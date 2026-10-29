@@ -515,6 +515,31 @@
             margin: 0;
         }
 
+        /* The set's view options in one row (wrapping on a narrow screen) */
+        .set-tools-row {
+            flex-wrap: wrap;
+            gap: 8px 14px;
+        }
+
+        .tool-group {
+            display: flex;
+            gap: 4px;
+        }
+
+        .tool-group:empty {
+            display: none;
+        }
+
+        .tool-group .chip {
+            min-height: 36px;
+            padding: 4px 11px;
+            font-size: 14px;
+        }
+
+        .set-tools-row .zoom {
+            margin-left: auto;
+        }
+
         .zoom {
             display: flex;
             gap: 4px;
@@ -811,6 +836,57 @@
 
         .chord-grid .field-hint {
             margin-bottom: 6px;
+        }
+
+        .chord-bars > span,
+        .chord-bars > button,
+        .bar-split > span,
+        .bar-split > button {
+            position: relative;
+        }
+
+        .chord-bars .bar-split {
+            display: flex;
+            padding: 0;
+            border: none;
+        }
+
+        .bar-split > * {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .chord-bars .bar-spacer {
+            border: none;
+        }
+
+        .chord-bars .ending {
+            padding-left: 15px;
+        }
+
+        .chord-bars .ending::before {
+            content: attr(data-ending);
+            position: absolute;
+            top: 2px;
+            left: 4px;
+            font-size: 10px;
+            font-weight: normal;
+            color: var(--woad);
+        }
+
+        .chord-bars .beats {
+            display: flex;
+            font-style: normal;
+        }
+
+        .chord-bars .beat {
+            flex: 1;
+            font-style: normal;
+        }
+
+        .chord-bars .held {
+            font-style: normal;
+            opacity: 0.4;
         }
 
         .chord-grid .chord-bars button {
@@ -1463,7 +1539,7 @@
             <div class="input-group">
                 <label for="fChords">Chords</label>
                 <textarea id="fChords" class="chord-input" maxlength="2000" autocapitalize="off" autocorrect="off" spellcheck="false" oninput="renderChordGrid()" placeholder="D D G A&#10;D D A AD&#10;&#10;G G D D&#10;G G A D"></textarea>
-                <p class="field-hint">Spaces between bars. Run two chords together to share a bar (AD). A blank line starts the next&nbsp;part.</p>
+                <p class="field-hint">Spaces between bars. Run two chords together to share a bar (AD), or mark the beats with hyphens (D-A-). A blank line starts the next part; lines starting 1: and 2: are endings. Numbers (1&nbsp;4&nbsp;5) work&nbsp;too.</p>
                 <p class="field-hint chords-from" id="chordsFrom" hidden>These came from the sheet music. Change anything; saving keeps your&nbsp;version.</p>
                 <div class="chord-grid" id="chordGrid"></div>
                 <div class="transpose-row">
@@ -1586,13 +1662,10 @@
                 <span class="set-view-title" id="setViewTitle"></span>
                 <button class="small-btn set-edit" onclick="editSet()">Edit</button>
             </div>
-            <div class="set-view-tools">
-                <span class="tools-label">Show</span>
-                <div class="seg" id="showSeg"></div>
-            </div>
-            <div class="set-view-tools">
-                <span class="tools-label">View as</span>
-                <div class="seg" id="layoutSeg"></div>
+            <div class="set-view-tools set-tools-row">
+                <div class="tool-group" id="showSeg"></div>
+                <div class="tool-group" id="layoutSeg"></div>
+                <div class="tool-group" id="setChordViews"></div>
                 <div class="zoom">
                     <button class="small-btn" onclick="changeDensity(1)" aria-label="Smaller music, more bars per line">−</button>
                     <button class="small-btn" onclick="changeDensity(-1)" aria-label="Bigger music, fewer bars per line">+</button>
@@ -1696,6 +1769,7 @@
             { id: 'AEAC♯', name: 'calico', main: true },
             { id: 'GDGD', name: 'cross G' },
             { id: 'GCGC', name: 'cross C' },
+            { id: 'ADAD', name: 'cross D' },
             { id: 'GCGD', name: 'low bass' },
             { id: 'DDAE', name: 'deadman' },
             { id: 'EDAE', name: 'low E' },
@@ -1970,12 +2044,12 @@
         }
 
         // A tune marked for several tunings of one shape goes by the family's name in the list
-        const FAMILY_WORDS = { '7-5-7': 'cross', '7-5-4': 'calico' };
+        const FAMILY_WORDS = { '7-5-7': 'cross', '7-5-4': 'calico', '5-7-5': 'reverse cross' };
 
         // Tunings of one shape are one family: the same fingerings, moved to other strings. Sorting
         // and filtering by tuning goes by family. The best-known families have a name of their
         // own; the rest go by the names of the tunings in them (or the notes, if unnamed).
-        const FAMILY_NAMES = { '7-7-7': 'standard', '7-5-7': 'cross', '7-5-4': 'calico' };
+        const FAMILY_NAMES = { '7-7-7': 'standard', '7-5-7': 'cross', '7-5-4': 'calico', '5-7-5': 'reverse cross' };
 
         function familyOf(id) {
             return tuningShape(id) || id;
@@ -2157,7 +2231,7 @@
             return Math.max(1, Math.max(2, Math.round(width / 190)) + musicDensity);
         }
 
-        function drawMusic(element, abc) {
+        function drawMusic(element, abc, shift) {
             const lines = abc.split('\n');
             const header = lines.filter(l => /^[A-Za-z]:/.test(l));
             const body = lines.filter(l => l.trim() && !/^[A-Za-z]:/.test(l))
@@ -2166,7 +2240,7 @@
             ensureAbcjs().then(() => {
                 window.ABCJS.renderAbc(element, header.join('\n') + '\n' + reflow(body, perLine) + '\n', {
                     responsive: 'resize', staffwidth: 40 + 165 * perLine,
-                    paddingleft: 0, paddingright: 0, foregroundColor: '#2c2416'
+                    paddingleft: 0, paddingright: 0, foregroundColor: '#2c2416', visualTranspose: shift || 0
                 });
             }).catch(() => { element.textContent = "Couldn't draw the notation."; });
         }
@@ -2180,7 +2254,7 @@
             root.querySelectorAll('[data-music]').forEach(element => {
                 const tune = tunes.find(t => t.id === element.dataset.music);
                 const link = tune && tune.links[Number(element.dataset.link || 0)];
-                if (link && link.abc) drawMusic(element, element.dataset.nochords ? withoutChords(link.abc) : link.abc);
+                if (link && link.abc) drawMusic(element, element.dataset.nochords ? withoutChords(link.abc) : link.abc, tune.dotsShift);
             });
         }
 
@@ -2201,6 +2275,52 @@
                 if (!view.hidden) drawAllMusic(view);
             }), 250);
         });
+
+        // Transposing the dots: the sheet music (and its chords) drawn up or down by half steps.
+        // The tune's key stays yours; a note offers to move it along. Kept with the tune.
+        function shiftDots(tuneId, steps) {
+            const tune = tunes.find(t => t.id === tuneId);
+            let shift = ((tune.dotsShift || 0) + steps) % 12;
+            if (shift > 6) shift -= 12;
+            if (shift < -6) shift += 12;
+            tune.dotsShift = shift;
+            tune.updated = Date.now();
+            save();
+            showPageSource(pageSource);
+        }
+
+        function dotsNoteHtml(tune, link) {
+            const now = dotsKey(tune, link);
+            const steps = `${tune.dotsShift > 0 ? 'up' : 'down'} ${Math.abs(tune.dotsShift)} half step${Math.abs(tune.dotsShift) === 1 ? '' : 's'}`;
+            const offer = now !== null && tune.key !== null && now !== tune.key
+                ? ` The tune's key is still ${KEYS[tune.key]}. <button class="link-btn" onclick="keyFollowsDots('${tune.id}')">Move it to ${KEYS[now]} too</button> ·`
+                : '';
+            return `<p class="prefer-note">Dots moved ${steps}${now === null ? '' : `, to ${KEYS[now]}`}.${offer} <button class="link-btn" onclick="shiftDots('${tune.id}', ${-tune.dotsShift})">put them back</button></p>`;
+        }
+
+        // The key the sheet music is written in, from its K: line
+        function abcKeyOf(abc) {
+            const match = String(abc || '').match(/^K:\s*([A-G][#b♯♭]?)/m);
+            return match ? pitchOf(match[1]) : null;
+        }
+
+        // Where the dots now sound, if that can be told
+        function dotsKey(tune, link) {
+            const written = link ? abcKeyOf(link.abc) : null;
+            return written === null ? null : (written + (tune.dotsShift || 0) + 12) % 12;
+        }
+
+        // The tune's key moves to where the dots now are
+        function keyFollowsDots(tuneId) {
+            const tune = tunes.find(t => t.id === tuneId);
+            const source = musicSources(tune)[pageSource];
+            const key = dotsKey(tune, source && tune.links[source.link]);
+            if (key === null) return;
+            tune.key = key;
+            tune.updated = Date.now();
+            save();
+            showPageSource(pageSource);
+        }
 
         // ---- Tune page ----
         // Tapping a tune opens its own page: everything about it, its dots (one tab per linked
@@ -2257,10 +2377,13 @@
                     <div class="music-tools">
                         ${sources.length > 1 ? `<div class="style-chips">${sources.map((x, i) => `<button class="chip style-chip${i === pageSource ? ' selected' : ''}" style="--accent: var(--woad)" onclick="showPageSource(${i})">${preferred && x.key === preferred.key ? '★ ' : ''}${x.label}</button>`).join('')}</div>` : '<span></span>'}
                         ${source.kind === 'abc' ? `<div class="zoom">
+                            <button class="small-btn" onclick="shiftDots('${tune.id}', -1)" aria-label="Transpose the dots down a half step">♭</button>
+                            <button class="small-btn" onclick="shiftDots('${tune.id}', 1)" aria-label="Transpose the dots up a half step">♯</button>
                             <button class="small-btn" onclick="changeDensity(1)" aria-label="Smaller music, more bars per line">−</button>
                             <button class="small-btn" onclick="changeDensity(-1)" aria-label="Bigger music, fewer bars per line">+</button>
                         </div>` : ''}
                     </div>
+                    ${source.kind === 'abc' && tune.dotsShift ? dotsNoteHtml(tune, tune.links[source.link]) : ''}
                     ${sources.length > 1 ? (source.key === preferred.key
                         ? '<p class="prefer-note">★ This is the one your sets use.</p>'
                         : `<p class="prefer-note"><button class="link-btn" onclick="preferSource('${tune.id}', '${source.key}')">★ Use this one in sets and open it first</button></p>`) : ''}
@@ -2566,6 +2689,13 @@
         let viewingSet = null;
         let viewingPage = 0;
 
+        // A set that changes time (jig into reel, and back): said along with the key change
+        function meterChange(from, to) {
+            const a = meterOf(from), b = meterOf(to);
+            if (a === b || a === 'other' || b === 'other') return '';
+            return `, and ${a} to ${b} (${from.type} into ${to.type})`;
+        }
+
         function showSet(id) {
             viewingSet = sets.find(s => s.id === id);
             const list = setTunes(viewingSet);
@@ -2578,8 +2708,8 @@
                 const showDots = setShow !== 'chords';
                 return `
                 <section class="set-tune">
-                    <p class="set-head"><button class="set-tune-link" onclick="openTunePage('${tune.id}')">${i + 1}. ${escapeHTML(tune.name)}</button> <span>${escapeHTML(metaText(tune))}</span>${moves[i] ? ` <span class="set-move-inline">from ${keyName(list[i - 1].key)}, ${escapeHTML(moves[i].why)}</span>` : ''}</p>
-                    ${showChords ? (chart && chart.parts.length ? chordChartHtml(tune) : (setShow === 'chords' ? '<p class="empty">No chords yet.</p>' : '')) : ''}
+                    <p class="set-head"><button class="set-tune-link" onclick="openTunePage('${tune.id}')">${i + 1}. ${escapeHTML(tune.name)}</button> <span>${escapeHTML(metaText(tune))}</span>${moves[i] ? ` <span class="set-move-inline">from ${keyName(list[i - 1].key)}, ${escapeHTML(moves[i].why)}${escapeHTML(meterChange(list[i - 1], tune))}</span>` : ''}</p>
+                    ${showChords ? (chart && chart.parts.length ? chordChartHtml(tune, true) : (setShow === 'chords' ? '<p class="empty">No chords yet.</p>' : '')) : ''}
                     ${!showDots ? '' : source && source.kind === 'abc' ? `<div class="set-dots" data-music="${tune.id}" data-link="${source.link}"${showChords ? '' : ' data-nochords="1"'}></div>`
                         : source ? `<img class="page-photo" data-photo="${source.id}" alt="Sheet music for ${escapeHTML(tune.name)}">`
                         : `<p class="empty">No dots yet. <button class="link-btn" onclick="findFromPage('${tune.id}')">Find it on The Session</button></p>`}
@@ -2600,6 +2730,7 @@
             box.className = `set-view-tunes layout-${setLayout}`;
             view.style.setProperty('--n', count);
             renderSeg('layoutSeg', LAYOUTS, setLayout, 'setSetLayout');
+            renderSetChordViews();
             document.getElementById('showSeg').innerHTML = [['dots', 'Dots'], ['chords', 'Chords']].map(([kind, label]) => {
                 const on = setShow === 'both' || setShow === kind;
                 return `<button class="chip${on ? ' selected' : ''}" onclick="toggleSetShow('${kind}')" aria-pressed="${on}">${label}</button>`;
@@ -2611,6 +2742,21 @@
             // Column widths change with the layout, so the music is re-flowed to fit
             drawAllMusic(view);
             showPhotos(view);
+        }
+
+        // The chord view for the whole set, once: letters or numbers, and for minor and modal
+        // tunes, 1 as their tonic or their relative major
+        function renderSetChordViews() {
+            const list = setTunes(viewingSet);
+            const box = document.getElementById('setChordViews');
+            if (setShow === 'dots' || !list.some(t => t.key !== null && chartFor(t))) {
+                box.innerHTML = '';
+                return;
+            }
+            const chip = (on, label, change) => `<button class="chip${on ? ' selected' : ''}" onclick='setChordView(${JSON.stringify(change)})' aria-pressed="${on}">${label}</button>`;
+            const modal = list.some(t => MODE_FROM_MAJOR[t.mode]);
+            box.innerHTML = chip(!chordView.numbers, 'A B C', { numbers: false }) + chip(chordView.numbers, '1 4 5', { numbers: true })
+                + (chordView.numbers && modal ? chip(!chordView.fromMajor, '1 = tonic', { fromMajor: false }) + chip(chordView.fromMajor, '1 = major', { fromMajor: true }) : '');
         }
 
         function toggleSetShow(kind) {
@@ -2657,6 +2803,15 @@
                 document.getElementById('setDroneKey').textContent = KEYS[tune.key];
             }
         }
+
+        document.addEventListener('keydown', event => {
+            if (document.getElementById('setView').hidden || !viewingSet || setLayout !== 'one') return;
+            if (!document.getElementById('dialog').hidden || /INPUT|TEXTAREA|SELECT/.test(event.target.tagName)) return;
+            if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
+                event.preventDefault();
+                turnSetPage(event.key === 'ArrowRight' ? 1 : -1);
+            }
+        });
 
         function closeSet() {
             document.getElementById('setView').hidden = true;
@@ -2900,7 +3055,9 @@
                 styles: [...editorStyles],
                 status: editorStatus,
                 author: titleCase(authorFieldValues().join(' & ')),
-                chords: document.getElementById('fChords').value.trim(),
+                chords: numbersToLetters(document.getElementById('fChords').value.trim(),
+                    document.getElementById('fKey').value === '' ? null : Number(document.getElementById('fKey').value),
+                    document.getElementById('fMode').value),
                 link: document.getElementById('fLink').value.trim(),
                 notes: document.getElementById('fNotes').value.trim(),
                 links: editorLinks.map(link => ({ ...link })),
@@ -3312,101 +3469,170 @@
             return total;
         }
 
-        // Bar-by-bar chords from ABC, split into parts where the repeats and double bars are
+        // ---- Reading chords from sheet music ----
+        // Parts come from the repeats and double bars, first and second endings from their marks,
+        // and where in a bar each chord falls from where its note falls, to the nearest beat. A
+        // bar's text has one chord, or one entry per beat when the chord changes mid-bar ("D - A -"
+        // is D for two beats, then A). A bar with no new chord repeats the one before.
+
+        // Beats in a bar: 6/8, 9/8 and 12/8 count in dotted quarters (2, 3, 4); others by their top number
+        function beatsPerBar(abc) {
+            const meter = ((String(abc).match(/^M:\s*([^\n%]*)/m) || [])[1] || '4/4').trim();
+            if (/^C\|/.test(meter)) return 2;
+            if (/^C/.test(meter)) return 4;
+            const [top, bottom] = meter.split('/').map(Number);
+            if (!top || !bottom) return 4;
+            return bottom === 8 && top % 3 === 0 ? top / 3 : top;
+        }
+
+        function barChords(content, beats, carried) {
+            const total = lengthIn(content);
+            const slots = new Array(beats).fill(null);
+            for (const m of content.matchAll(/"([^"]+)"/g)) {
+                const chord = m[1].trim();
+                if (!CHORD.test(chord)) continue;
+                slots[Math.min(beats - 1, Math.round(lengthIn(content.slice(0, m.index)) / total * beats))] = chord;
+            }
+            let current = carried;
+            const tokens = slots.map((chord, i) => {
+                if (i === 0) {
+                    current = chord || carried;
+                    return current || '·';
+                }
+                if (!chord || chord === current) return '-';
+                current = chord;
+                return chord;
+            });
+            // The same chord all bar long is just that chord
+            return { text: tokens.slice(1).every(t => t === '-') ? tokens[0] : tokens.join(' '), last: current };
+        }
+
+        function newPart(n) {
+            return { label: String.fromCharCode(65 + n), bars: [], first: [], second: [] };
+        }
+
+        // Endings that turn out not to differ are just bars of the part
+        function tidyEndings(p) {
+            if (p.first.length && (!p.second.length || p.first.join('|') === p.second.join('|'))) p.bars.push(...p.first);
+            if (!p.second.length || p.first.join('|') === p.second.join('|')) {
+                p.first = [];
+                p.second = [];
+            }
+            return p;
+        }
+
         function chordsFromAbc(abc) {
+            const beats = beatsPerBar(abc);
             const body = abc.split('\n').filter(l => l.trim() && !/^[A-Za-z]:/.test(l)).join(' ');
             const parts = body.split(/(\[\||\|\]|::|:*\|+:*)/);
             // Pickups (into either part) are short bars: under half the usual length
             const counts = parts.filter((_, i) => i % 2 === 0).map(lengthIn).filter(n => n > 0).sort((a, b) => a - b);
             const usual = counts[Math.floor(counts.length / 2)] || 0;
             const result = [];
-            let current = { label: 'A', bars: [] };
+            let current = newPart(0);
             let last = '';
-            // First and second endings are the same bars of the part, played on different passes:
-            // each second-ending bar's chords join the matching first-ending bar's ("1.A 2.D")
-            // rather than taking a bar of their own, which would push everything after over by
-            // one. Parts can be any length (crooked tunes), and if the second ending runs longer
-            // than the first, its extra bars just carry on the part.
-            let firstEnding = [];  // where the first-ending bars sit in current.bars
-            let ending = 0;        // which ending we're in, 0 for none
-            let secondCount = 0;
+            let ending = 0; // 1 or 2 inside an ending; -1 after a first ending, waiting for the second
             const close = () => {
-                result.push(current);
-                current = { label: String.fromCharCode(65 + result.length), bars: [] };
-                firstEnding = [];
+                result.push(tidyEndings(current));
+                current = newPart(result.length);
                 ending = 0;
-                secondCount = 0;
             };
             for (let i = 0; i < parts.length; i += 2) {
                 const content = parts[i];
                 const bar = parts[i + 1] || '';
                 const marked = content.match(/^\s*\[?([1-9])/);
+                // A first ending with no second after it: the next bars are a new part
+                if (ending === -1 && !marked && lengthIn(content) > 0) close();
                 if (marked) ending = Number(marked[1]);
                 if (lengthIn(content) > 0 && lengthIn(content) >= usual / 2) {
-                    const chords = [...content.matchAll(/"([^"]+)"/g)].map(m => m[1].trim()).filter(c => CHORD.test(c));
-                    const text = chords.length ? chords.join(' ') : (last ? '·' : '');
-                    if (chords.length) last = chords[chords.length - 1];
-                    if (ending >= 2 && secondCount < firstEnding.length) {
-                        const at = firstEnding[secondCount++];
-                        const first = current.bars[at];
-                        if (text && text !== '·' && text !== first) current.bars[at] = `1.${first} 2.${text}`;
-                    } else {
-                        if (ending === 1) firstEnding.push(current.bars.length);
-                        current.bars.push(text);
-                    }
+                    const chords = barChords(content, beats, last);
+                    last = chords.last;
+                    (ending === 1 ? current.first : ending >= 2 ? current.second : current.bars).push(chords.text);
                 }
                 // An end repeat, a double bar or a new start repeat closes a part, except the
                 // repeat at the end of a first ending: the second ending still belongs to this part
                 const closes = /:\||\|\||\|\]|::|\|:/.test(bar);
                 if (ending === 1 && closes) {
-                    ending = 0;
+                    ending = -1;
                     continue;
                 }
-                if (current.bars.length && closes) close();
+                if (closes && (current.bars.length || current.first.length)) close();
             }
-            if (current.bars.length) result.push(current);
-            return result.filter(p => p.bars.some(b => b && b !== '·'));
+            if (current.bars.length || current.first.length) result.push(tidyEndings(current));
+            return result.filter(p => [...p.bars, ...p.first, ...p.second].some(b => b && b !== '·'));
         }
 
-        // Typed on a phone without the symbols keyboard: spaces between bars, two chords run
-        // together share a bar ("AD"), a blank line starts the next part. "|" and "A:" work too.
-        // Lowercase is fine ("am" is A minor); a b after a letter is a flat
-        const CHORD_RUN = /[a-g][#b♯♭]?(?:maj|min|dim|aug|sus|add|m)?\d*(?:\/[a-g][#b♯♭]?)?/gi;
+        // ---- Chord charts as text ----
+        // One line per row, "A:" to start a part, a blank line between parts. Bars are split by
+        // "|" or by spaces. In a bar, chords one after another share it evenly ("AD"), or one per
+        // beat with hyphens for beats with no change ("D-A-", "D - - A"). Lines starting "1:" and
+        // "2:" are a part's first and second endings. Lowercase is fine ("am" is A minor), and so
+        // are numbers (1, 4, 5, 6m, b7), which become letters in the tune's key when it's saved.
+
+        const LETTER_RUN = /-|·|[a-g][#b♯♭]?(?:maj|min|dim|aug|sus|add|m)?\d*(?:\/[a-g][#b♯♭]?)?/gi;
+        const NUMBER_RUN = /-|·|[b♭#♯]?[1-7](?:maj|min|dim|aug|sus|add|m)?\d*(?:\/[b♭#♯]?[1-7])?|[a-g][#b♯♭]?(?:maj|min|dim|aug|sus|add|m)?\d*(?:\/[a-g][#b♯♭]?)?/gi;
 
         function tidyChord(chord) {
             return chord.toLowerCase().replace(/(^|\/)([a-g])/g, (m, slash, root) => slash + root.toUpperCase());
         }
 
-        function splitBar(token) {
-            const chords = token.match(CHORD_RUN);
-            return chords && chords.join('') === token ? chords.map(tidyChord).join(' ') : token;
+        // A chart in numbers has a bar or beat that starts with a digit (endings' "1:" aside)
+        function inNumbers(text) {
+            return /(?:^|[\s|-])[b♭#♯]?[1-7](?![.:\d])/m.test(String(text).replace(/^\s*[12][.:]\s/gm, ''));
+        }
+
+        function splitRun(token, numbers) {
+            const runs = token.match(numbers ? NUMBER_RUN : LETTER_RUN);
+            return runs && runs.join('') === token ? runs.map(tidyChord) : [token];
+        }
+
+        function tidyBar(text, numbers) {
+            return text.trim().split(/\s+/).filter(Boolean).flatMap(token => splitRun(token, numbers)).join(' ');
         }
 
         function parseChordText(text) {
+            const numbers = inNumbers(text);
             const parts = [];
             let current = null;
+            let target = 'bars';
             String(text || '').split('\n').forEach(line => {
                 if (!line.trim()) {
                     current = null;
                     return;
                 }
-                const label = line.match(/^\s*([A-Za-z0-9 ]{1,8}):\s*(.*)$/);
-                if (label) {
-                    current = { label: label[1].trim(), bars: [] };
+                const ending = current && line.match(/^\s*([12])[.:]\s+(.*)$/);
+                const label = !ending && line.match(/^\s*([A-Za-z0-9 ]{1,8}):\s*(.*)$/);
+                if (ending) {
+                    target = ending[1] === '1' ? 'first' : 'second';
+                    line = ending[2];
+                } else if (label) {
+                    current = { label: label[1].trim(), bars: [], first: [], second: [] };
                     parts.push(current);
+                    target = 'bars';
                     line = label[2];
                 }
                 const bars = line.includes('|')
-                    ? line.split('|').map(b => b.trim()).filter(Boolean)
-                    : line.trim().split(/\s+/).filter(Boolean).map(splitBar);
+                    ? line.split('|').map(b => tidyBar(b, numbers)).filter(Boolean)
+                    : line.trim().split(/\s+/).filter(Boolean).map(token => splitRun(token, numbers).join(' '));
                 if (!bars.length) return;
                 if (!current) {
-                    current = { label: '', bars: [] };
+                    current = { label: '', bars: [], first: [], second: [] };
                     parts.push(current);
+                    target = 'bars';
                 }
-                current.bars.push(...bars);
+                current[target].push(...bars);
             });
-            const filled = parts.filter(p => p.bars.length);
+            // Charts saved before endings had lines of their own kept them in a part's last bar: "1.A 2.D"
+            parts.forEach(p => {
+                const lastBar = p.bars[p.bars.length - 1];
+                const old = !p.first.length && lastBar && lastBar.match(/^1\.(.+?)\s+2\.(.+)$/);
+                if (old) {
+                    p.bars.pop();
+                    p.first = [old[1]];
+                    p.second = [old[2]];
+                }
+            });
+            const filled = parts.filter(p => p.bars.length || p.first.length);
             // Unnamed parts are lettered when there's more than one
             if (filled.length > 1) filled.forEach((p, i) => { if (!p.label) p.label = String.fromCharCode(65 + i); });
             return filled;
@@ -3421,18 +3647,108 @@
             return rows;
         }
 
-        function barRowsHtml(bars, cell) {
-            let at = 0;
-            return `<div class="chord-rows">${barRows(bars).map(row =>
-                `<div class="chord-bars" style="--bars: ${row.length}">${row.map(b => cell(b, at++)).join('')}</div>`
-            ).join('')}</div>`;
-        }
-
         function chordText(parts) {
             return parts.map(p => {
-                const rows = barRows(p.bars).map(row => row.join(' | '));
-                return `${p.label ? p.label + ': ' : ''}${rows.join('\n' + ' '.repeat(p.label ? p.label.length + 2 : 0))}`;
+                const pad = ' '.repeat(p.label ? p.label.length + 2 : 0);
+                // A line of one bar ends with "|", so a bar like "D - A -" reads back as one bar
+                const line = bars => bars.join(' | ') + (bars.length === 1 ? ' |' : '');
+                const rows = p.bars.length ? barRows(p.bars).map(line) : [''];
+                if (p.first && p.first.length) rows.push('1: ' + line(p.first), '2: ' + line(p.second));
+                return `${p.label ? p.label + ': ' : ''}${rows.join('\n' + pad)}`;
             }).join('\n');
+        }
+
+        // Numbers become letters in the tune's key (1 counted the way the chart view counts it)
+        const MAJOR_STEPS = [0, 2, 4, 5, 7, 9, 11];
+
+        function spellingFor(key, mode) {
+            const major = (key - (MODE_FROM_MAJOR[mode] || 0) + 12) % 12;
+            return [5, 10, 3, 8, 1].includes(major) ? NOTE_NAMES.flat : NOTE_NAMES.sharp;
+        }
+
+        function numbersToLetters(text, key, mode) {
+            if (key === null || !inNumbers(text)) return text;
+            const home = (key - (chordView.fromMajor ? MODE_FROM_MAJOR[mode] || 0 : 0) + 12) % 12;
+            const names = spellingFor(key, mode);
+            const letter = degree => {
+                const m = degree.match(/^([b♭#♯]?)([1-7])$/);
+                return names[(home + MAJOR_STEPS[m[2] - 1] + (/[b♭]/.test(m[1]) ? -1 : /[#♯]/.test(m[1]) ? 1 : 0) + 12) % 12];
+            };
+            const parts = parseChordText(text);
+            const convert = bar => bar.split(' ').map(token => {
+                const m = token.match(/^([b♭#♯]?[1-7])(.*?)(?:\/([b♭#♯]?[1-7]))?$/);
+                return m ? letter(m[1]) + m[2] + (m[3] ? '/' + letter(m[3]) : '') : token;
+            }).join(' ');
+            parts.forEach(p => ['bars', 'first', 'second'].forEach(list => p[list] = (p[list] || []).map(convert)));
+            return chordText(parts);
+        }
+
+        // ---- Drawing a chart ----
+        // A part's bars in rows. A one-bar first and second ending share the last box, side by
+        // side, when their chords fit; longer ones put the second ending on a row of its own,
+        // starting under the first ending. Chords sit in a bar by beat, and a bar or beat with no
+        // new chord shows the one before it, faded.
+
+        function barInnerHtml(text, prev) {
+            const tokens = String(text || '·').split(' ');
+            const held = chord => `<i class="held">${escapeHTML(chord || '')}</i>`;
+            if (tokens.length === 1) return tokens[0] === '·' || tokens[0] === '-' ? held(prev) : escapeHTML(tokens[0]);
+            return `<i class="beats">${tokens.map((token, i) =>
+                `<i class="beat">${token === '-' || token === '·' ? (i === 0 ? held(prev) : '') : escapeHTML(token)}</i>`).join('')}</i>`;
+        }
+
+        // The last chord sounding at the end of a bar
+        function lastChordOf(text, prev) {
+            const chords = String(text || '').split(' ').filter(token => token !== '-' && token !== '·' && token);
+            return chords.length ? chords[chords.length - 1] : prev;
+        }
+
+        // Endings this short share a box: one chord each, nothing long
+        function fitsHalfBox(text) {
+            const chords = text.split(' ').filter(t => t !== '-');
+            return chords.length <= 1 && text.length <= 5;
+        }
+
+        // cell(text, prev, key, ending) draws one bar; key says where it lives ('b3', 'f0', 's1')
+        function partHtml(p, show, cell) {
+            const items = [];
+            let prev = '';
+            p.bars.forEach((bar, j) => {
+                items.push({ html: cell(show(bar), show(prev), 'b' + j) });
+                prev = lastChordOf(bar, prev);
+            });
+            const first = p.first || [];
+            const second = p.second || [];
+            const beforeEndings = prev;
+            const run = (list, letter, ending, start) => {
+                let before = start;
+                return list.map((bar, j) => {
+                    const html = cell(show(bar), show(before), letter + j, ending);
+                    before = lastChordOf(bar, before);
+                    return { html, ending };
+                });
+            };
+            if (first.length === 1 && second.length === 1 && fitsHalfBox(first[0]) && fitsHalfBox(second[0])) {
+                const [a] = run(first, 'f', 1, beforeEndings);
+                const [b] = run(second, 's', 2, beforeEndings);
+                items.push({ html: `<div class="bar-split">${a.html}${b.html}</div>` });
+                return rowsHtml(barRows(items));
+            }
+            const firstItems = run(first, 'f', 1, beforeEndings);
+            const rows = barRows([...items, ...firstItems]);
+            if (second.length) {
+                // Under where the first ending starts (or from the left, if it starts a row)
+                const startRow = rows.findIndex(row => row.includes(firstItems[0]));
+                const column = startRow === rows.length - 1 ? rows[startRow].indexOf(firstItems[0]) : 0;
+                rows.push([...new Array(column).fill({ html: '<div class="bar-spacer"></div>' }), ...run(second, 's', 2, beforeEndings)]);
+            }
+            return rowsHtml(rows, rows[rows.length - 2] ? rows[rows.length - 2].length : 4);
+        }
+
+        function rowsHtml(rows, minColumns) {
+            return `<div class="chord-rows">${rows.map(row =>
+                `<div class="chord-bars" style="--bars: ${Math.max(row.length, row.some(item => item.html.includes('bar-spacer')) ? minColumns || 4 : row.length)}">${row.map(item => item.html).join('')}</div>`
+            ).join('')}</div>`;
         }
 
         // Which chart a tune shows: its own, or the first linked setting that has chords
@@ -3440,7 +3756,10 @@
             if (tune.chords && tune.chords.trim()) return { parts: parseChordText(tune.chords), from: 'your chart' };
             const link = tune.links.find(l => hasChords(l.abc));
             if (!link) return null;
-            return { parts: chordsFromAbc(link.abc), from: link.kind === 'abc' ? 'the pasted ABC' : `The Session${link.number ? `, setting ${link.number}` : ''}` };
+            const parts = chordsFromAbc(link.abc);
+            // Moved dots take their chords with them
+            if (tune.dotsShift) transposeParts(parts, tune.dotsShift, dotsKey(tune, link) ?? tune.key, tune.mode);
+            return { parts, from: link.kind === 'abc' ? 'the pasted ABC' : `The Session${link.number ? `, setting ${link.number}` : ''}` };
         }
 
         // ---- Chords as numbers ----
@@ -3488,8 +3807,9 @@
             localStorage.setItem(CHORD_VIEW_KEY, JSON.stringify(chordView));
             document.querySelectorAll('.chord-chart[data-tune]').forEach(chart => {
                 const tune = tunes.find(t => t.id === chart.dataset.tune);
-                if (tune) chart.outerHTML = chordChartHtml(tune);
+                if (tune) chart.outerHTML = chordChartHtml(tune, chart.dataset.set);
             });
+            if (viewingSet && !document.getElementById('setView').hidden) renderSetChordViews();
         }
 
         function chordViewButtons(tune) {
@@ -3503,7 +3823,7 @@
             </div>`;
         }
 
-        function chordChartHtml(tune) {
+        function chordChartHtml(tune, inSet) {
             const chart = chartFor(tune);
             const sessionLinked = tune.links.some(l => l.tune);
             if (!chart || !chart.parts.length) {
@@ -3512,13 +3832,13 @@
             const numbers = chordView.numbers && tune.key !== null;
             const show = bar => numbers ? asNumbers(bar, chordHome(tune)) : bar;
             return `
-                <div class="chord-chart" data-tune="${tune.id}">
+                <div class="chord-chart" data-tune="${tune.id}"${inSet ? ' data-set="1"' : ''}>
                     <div class="chord-head"><span class="sub-label">Chords</span><span class="chip-key">from ${escapeHTML(chart.from)}</span><button class="link-btn chords-edit" onclick="editFromPage('${tune.id}', 'chords')">edit</button></div>
-                    ${chordViewButtons(tune)}
+                    ${inSet ? '' : chordViewButtons(tune)}
                     ${chart.parts.map(p => `
                         <div class="chord-part">
                             ${p.label ? `<span class="chord-label">${escapeHTML(p.label)}</span>` : ''}
-                            ${barRowsHtml(p.bars, b => `<span>${escapeHTML(show(b))}</span>`)}
+                            ${partHtml(p, show, (bar, prev, key, ending) => `<span${ending ? ` class="ending" data-ending="${ending}"` : ''}>${barInnerHtml(bar, prev)}</span>`)}
                         </div>`).join('')}
                 </div>`;
         }
@@ -3586,7 +3906,7 @@
             document.getElementById('chordGrid').innerHTML = (parts.length ? '<p class="field-hint">Tap a bar to change it.</p>' : '') + parts.map((p, i) => `
                 <div class="chord-part">
                     ${p.label ? `<span class="chord-label">${escapeHTML(p.label)}</span>` : ''}
-                    ${barRowsHtml(p.bars, (b, j) => `<button type="button" onclick="editChordBar(${i}, ${j})" aria-label="Bar ${j + 1}: ${escapeHTML(b)}">${escapeHTML(b)}</button>`)}
+                    ${partHtml(p, bar => bar, (bar, prev, key, ending) => `<button type="button"${ending ? ` class="ending" data-ending="${ending}"` : ''} onclick="editChordBar(${i}, '${key}')" aria-label="${ending ? (ending === 1 ? 'First ending, ' : 'Second ending, ') : ''}bar ${Number(key.slice(1)) + 1}: ${escapeHTML(bar)}">${barInnerHtml(bar, prev)}</button>`)}
                 </div>
                 <div class="chord-shift">
                     <button type="button" class="link-btn" onclick="shiftChordPart(${i}, -1)">‹ slide ${p.label ? escapeHTML(p.label) + ' ' : ''}left</button>
@@ -3594,25 +3914,36 @@
                 </div>`).join('');
         }
 
-        // Transpose the whole chart by half steps. The key moves with it (so numbers still line
-        // up); the spelling follows the new key, flats in flat keys. The sheet music stays as it is.
+        // Moves every chord in a chart by half steps, spelled for the key it lands in (flats in flat keys)
+        function transposeParts(parts, steps, landsIn, mode) {
+            const names = landsIn === null ? NOTE_NAMES.sharp : spellingFor(landsIn, mode);
+            const move = note => names[(pitchOf(note) + steps + 12) % 12];
+            parts.forEach(p => ['bars', 'first', 'second'].forEach(list =>
+                p[list] = (p[list] || []).map(bar => mapChords(bar, ([, root, rest, bass]) => move(root) + rest + (bass ? '/' + move(bass) : '')))));
+            return parts;
+        }
+
+        // Transpose the chart by half steps: for chords that came in from a setting in another key.
+        // The tune's key is yours, so it stays put; a note offers to move it along too.
         function transposeChords(steps) {
             const keySelect = document.getElementById('fKey');
-            const key = keySelect.value === '' ? null : (Number(keySelect.value) + steps + 12) % 12;
+            const key = keySelect.value === '' ? null : Number(keySelect.value);
             const mode = document.getElementById('fMode').value;
-            const major = key === null ? null : (key - (MODE_FROM_MAJOR[mode] || 0) + 12) % 12;
-            const names = [5, 10, 3, 8, 1].includes(major) ? NOTE_NAMES.flat : NOTE_NAMES.sharp;
-            const move = note => names[(pitchOf(note) + steps + 12) % 12];
-            const parts = editorChordParts();
-            parts.forEach(p => p.bars = p.bars.map(bar => mapChords(bar, ([, root, rest, bass]) => move(root) + rest + (bass ? '/' + move(bass) : ''))));
-            if (key !== null) keySelect.value = key;
-            writeChordParts(parts);
-            transposedBy = (transposedBy + steps + 12) % 12;
+            transposedBy = ((transposedBy + steps) % 12 + 12) % 12;
+            const landsIn = key === null ? null : (key + transposedBy) % 12;
+            writeChordParts(transposeParts(editorChordParts(), steps, landsIn, mode));
             const note = document.getElementById('transposeNote');
             note.hidden = !transposedBy;
-            if (transposedBy) note.textContent = key === null
-                ? 'Chords moved. The sheet music stays in its own key.'
-                : `Chords and key moved to ${KEYS[key]}. The sheet music stays in its own key.`;
+            const moved = transposedBy <= 6 ? `up ${transposedBy}` : `down ${12 - transposedBy}`;
+            if (transposedBy) note.innerHTML = `Chords moved ${moved} half step${transposedBy % 12 === 1 || transposedBy === 11 ? '' : 's'}.`
+                + (key === null ? '' : ` The key is still ${KEYS[key]}. <button type="button" class="link-btn" onclick="keyFollowsChords()">Move the key to ${KEYS[landsIn]} too</button>`);
+        }
+
+        function keyFollowsChords() {
+            const keySelect = document.getElementById('fKey');
+            keySelect.value = (Number(keySelect.value) + transposedBy) % 12;
+            transposedBy = 0;
+            document.getElementById('transposeNote').hidden = true;
         }
 
         function shiftChordPart(i, direction) {
@@ -3623,12 +3954,15 @@
             writeChordParts(parts);
         }
 
-        async function editChordBar(i, j) {
+        async function editChordBar(i, key) {
             const parts = editorChordParts();
-            const now = parts[i].bars[j];
-            const text = await ask(`Bar ${j + 1}${parts[i].label ? ' of ' + parts[i].label : ''}: its chords. Two in a bar: "A D". Leave it blank to hold the last one.`, { input: now === '·' ? '' : now });
+            const list = { b: 'bars', f: 'first', s: 'second' }[key[0]];
+            const j = Number(key.slice(1));
+            const now = parts[i][list][j];
+            const where = `${list === 'first' ? 'First ending, bar' : list === 'second' ? 'Second ending, bar' : 'Bar'} ${j + 1}${parts[i].label ? ' of ' + parts[i].label : ''}`;
+            const text = await ask(`${where}. Its chord, or one per beat if it changes mid-bar, with a hyphen for each beat with no change: "D - A -". Blank holds the last one.`, { input: now === '·' ? '' : now });
             if (text === null) return;
-            parts[i].bars[j] = text.trim() ? text.trim().split(/\s+/).map(splitBar).join(' ') : '·';
+            parts[i][list][j] = text.trim() ? tidyBar(text, inNumbers(text)) : '·';
             writeChordParts(parts);
         }
 
@@ -4101,7 +4435,8 @@
                     id: typeof t.id === 'string' && /^[\w-]{1,40}$/.test(t.id) ? t.id : newId(),
                     name: titleCase(t.name.trim().slice(0, 80)),
                     key: t.key === null ? null : Number.isInteger(t.key) && t.key >= 0 && t.key < 12 ? t.key : 2,
-                    mode: MODES.includes(t.mode) ? t.mode : 'major',
+                    mode: typeof t.mode === 'string' && t.mode.trim() ? t.mode.trim().toLowerCase().slice(0, 30) : 'major',
+                    dotsShift: Number.isInteger(t.dotsShift) && Math.abs(t.dotsShift) < 12 ? t.dotsShift : 0,
                     type: typeof t.type === 'string' && t.type.trim() ? t.type.trim().toLowerCase().slice(0, 30) : 'other',
                     tunings: t.tunings.map(x => String(x).slice(0, 40)).filter(Boolean).slice(0, 6),
                     styles: t.styles.filter(id => typeof id === 'string' && id.trim()).map(id => STYLES.some(style => style.id === id) ? id : titleCase(id.slice(0, 30))).slice(0, 8),
