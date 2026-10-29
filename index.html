@@ -3622,15 +3622,17 @@
                 }
                 current[target].push(...bars);
             });
-            // Charts saved before endings had lines of their own kept them in a part's last bar: "1.A 2.D"
+            // Charts saved before endings had lines of their own folded them into the part's last
+            // bars, one "1.A 2.D" per bar of the ending: unfold every one of them
             parts.forEach(p => {
-                const lastBar = p.bars[p.bars.length - 1];
-                const old = !p.first.length && lastBar && lastBar.match(/^1\.(.+?)\s+2\.(.+)$/);
-                if (old) {
-                    p.bars.pop();
-                    p.first = [old[1]];
-                    p.second = [old[2]];
-                }
+                if (p.first.length) return;
+                const folded = [];
+                while (p.bars.length && /^1\.(.+?)\s+2\.(.+)$/.test(p.bars[p.bars.length - 1])) folded.unshift(p.bars.pop());
+                folded.forEach(bar => {
+                    const [, first, second] = bar.match(/^1\.(.+?)\s+2\.(.+)$/);
+                    p.first.push(first);
+                    p.second.push(second);
+                });
             });
             const filled = parts.filter(p => p.bars.length || p.first.length);
             // Unnamed parts are lettered when there's more than one
