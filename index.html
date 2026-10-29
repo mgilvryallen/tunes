@@ -2205,6 +2205,29 @@
             // Short bars (pickups into a part, and the bars they complete) don't count toward a line
             const lengths = contents.map(lengthIn).filter(n => n > 0).sort((a, b) => a - b);
             const usual = lengths[Math.floor(lengths.length / 2)] || 0;
+            // A first pass finds how many full bars each part has, so its lines can share them out
+            // evenly: 8 bars with room for 7 a line is two lines of 4, not 7 and a lonely 1
+            const counts = (() => {
+                const sizes = [];
+                let n = 0;
+                let state = 0;
+                for (let i = 0; i < parts.length; i += 2) {
+                    const marked = parts[i].match(/^\s*\[?(\d)/);
+                    if (state === -1 && !marked && lengthIn(parts[i]) > 0) state = 0;
+                    if (marked) state = Number(marked[1]);
+                    if (lengthIn(parts[i]) >= usual / 2 && lengthIn(parts[i]) > 0) n++;
+                    const closes = /:\||\|\||\|\]|::|\|:/.test(parts[i + 1] || '');
+                    if (closes && state !== 1 && n > 0) {
+                        sizes.push(n);
+                        n = 0;
+                    }
+                    if (closes) state = state === 1 ? -1 : 0;
+                }
+                if (n > 0) sizes.push(n);
+                return sizes;
+            })();
+            const lineSize = size => Math.ceil(size / Math.ceil(size / perLine));
+            let partIndex = 0;
             const lines = [];
             let line = '';
             let count = 0;
@@ -2223,7 +2246,9 @@
                 if (closes) ending = ending === 1 ? -1 : 0;
                 const moreToCome = parts.slice(i + 2).some((p, j) => j % 2 === 0 && notesIn(p) > 0);
                 // (a pickup on its own, before a start repeat, stays with the bars it leads into)
-                if ((count >= perLine || (partEnds && count > 0)) && bar && moreToCome) {
+                const target = lineSize(counts[partIndex] || perLine);
+                if (partEnds && count > 0) partIndex++;
+                if ((count >= target || (partEnds && count > 0)) && bar && moreToCome) {
                     // A start-repeat belongs at the start of the next line
                     const opens = /\|:+$/.test(bar) || bar === '::';
                     lines.push(line + (opens ? bar.replace(/:+$/, '').replace(/^::$/, ':|') : bar));
