@@ -191,6 +191,20 @@
             min-width: 0;
         }
 
+        /* Key, mode and type side by side; the key is short, so its column is narrower */
+        .key-row {
+            display: grid;
+            grid-template-columns: 0.55fr 1.3fr 1.38fr;
+            gap: 6px;
+        }
+
+        .key-row select {
+            padding-left: 8px;
+            padding-right: 18px;
+            letter-spacing: -0.4px;
+            background-position: calc(100% - 11px) 50%, calc(100% - 6px) 50%;
+        }
+
         .btn {
             display: block;
             width: 100%;
@@ -758,6 +772,34 @@
             min-height: 34px;
         }
 
+        .chord-views {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin: 6px 0 8px;
+        }
+
+        .chord-views .chip {
+            min-height: 30px;
+            padding: 2px 10px;
+            font-size: 13px;
+        }
+
+        .chord-views-gap {
+            width: 10px;
+        }
+
+        .transpose-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: 4px 0 6px;
+        }
+
+        .transpose-row .field-hint {
+            margin: 0 4px 0 0;
+        }
+
         .chords-edit {
             margin-left: auto;
             font-size: 14px;
@@ -799,6 +841,15 @@
         .chord-shift .link-btn {
             font-size: 13px;
             padding: 0;
+        }
+
+        .author-field + .author-field {
+            margin-top: 8px;
+        }
+
+        .add-author {
+            font-size: 14px;
+            padding: 6px 0 0;
         }
 
         .chord-input {
@@ -1250,6 +1301,81 @@
             color: var(--muted);
             font-size: 14px;
         }
+
+        /* ---- The app's own dialog box (in place of the browser's alert, confirm and prompt) ---- */
+
+        .dialog {
+            position: fixed;
+            inset: 0;
+            z-index: 100;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            background: rgba(44, 36, 22, 0.35);
+        }
+
+        .dialog-box {
+            width: 100%;
+            max-width: 360px;
+            background: var(--paper);
+            border: 1px solid var(--light-tan);
+            border-top: 4px solid var(--heading);
+            padding: 20px;
+            box-shadow: 0 10px 30px rgba(44, 36, 22, 0.25);
+        }
+
+        .dialog-box p {
+            color: var(--ink);
+            font-size: 16px;
+            line-height: 1.5;
+            white-space: pre-line;
+        }
+
+        .dialog-box input {
+            width: 100%;
+            margin-top: 14px;
+            padding: 10px 12px;
+            min-height: 44px;
+            border: 1px solid var(--light-tan);
+            border-radius: 0;
+            background: var(--parchment);
+            color: var(--ink);
+            font-family: inherit;
+            font-size: 16px;
+            -webkit-appearance: none;
+            appearance: none;
+        }
+
+        .dialog-box input:focus {
+            outline: none;
+            border-color: var(--green);
+        }
+
+        .dialog-buttons {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            margin-top: 18px;
+        }
+
+        .dialog-buttons button {
+            min-height: 42px;
+            padding: 8px 18px;
+            border: 1px solid var(--heading);
+            background: var(--heading);
+            color: var(--parchment);
+            font-family: 'Rug Pull', Georgia, serif;
+            font-size: 16px;
+            letter-spacing: 0.5px;
+            cursor: pointer;
+        }
+
+        .dialog-buttons .dialog-cancel {
+            background: transparent;
+            color: var(--heading);
+            border-color: var(--light-tan);
+        }
     </style>
 </head>
 <body>
@@ -1290,19 +1416,23 @@
                 <input type="text" id="customStyleName" maxlength="30" placeholder="Name your own: Swedish, Galician…" aria-label="New style name">
                 <button class="small-btn" onclick="addCustomStyle()">Add</button>
             </div>
-            <div class="row">
+            <div class="key-row">
                 <div class="input-group">
                     <label for="fKey">Key</label>
                     <select id="fKey"></select>
                 </div>
                 <div class="input-group">
                     <label for="fMode">Mode</label>
-                    <select id="fMode"></select>
+                    <select id="fMode" onchange="modeChosen(this)"></select>
+                </div>
+                <div class="input-group">
+                    <label for="fType">Type</label>
+                    <select id="fType" onchange="typeChosen(this)"></select>
                 </div>
             </div>
-            <div class="input-group">
-                <label for="fType">Type</label>
-                <select id="fType" onchange="typeChosen(this)"></select>
+            <div class="row custom-style" id="customModeRow" hidden>
+                <input type="text" id="customModeName" maxlength="30" placeholder="phrygian, lydian, gapped…" aria-label="New mode">
+                <button class="small-btn" onclick="addCustomMode()">Add</button>
             </div>
             <div class="row custom-style" id="customTypeRow" hidden>
                 <input type="text" id="customTypeName" maxlength="30" placeholder="polska, hambo, barn dance…" aria-label="New tune type">
@@ -1322,8 +1452,9 @@
             <div class="sub-label">How well I know it</div>
             <div class="seg" id="statusSeg"></div>
             <div class="input-group">
-                <label for="fAuthor">Author</label>
-                <input type="text" id="fAuthor" maxlength="120" placeholder="Jay Ungar, or trad.">
+                <label for="fAuthor0">Author</label>
+                <div id="authorList"></div>
+                <button class="link-btn add-author" onclick="addAuthorField()">+ add another author</button>
             </div>
             <div class="input-group">
                 <label for="fLink">Recording link</label>
@@ -1335,6 +1466,12 @@
                 <p class="field-hint">Spaces between bars. Run two chords together to share a bar (AD). A blank line starts the next&nbsp;part.</p>
                 <p class="field-hint chords-from" id="chordsFrom" hidden>These came from the sheet music. Change anything; saving keeps your&nbsp;version.</p>
                 <div class="chord-grid" id="chordGrid"></div>
+                <div class="transpose-row">
+                    <span class="field-hint">Transpose</span>
+                    <button type="button" class="small-btn" onclick="transposeChords(-1)" aria-label="Transpose down a half step">♭ down</button>
+                    <button type="button" class="small-btn" onclick="transposeChords(1)" aria-label="Transpose up a half step">up ♯</button>
+                </div>
+                <p class="field-hint" id="transposeNote" hidden></p>
                 <button class="link-btn chords-copy" onclick="copyChordsFromDots()">copy the chords from the sheet music</button>
             </div>
             <div class="input-group">
@@ -1477,9 +1614,68 @@
         </div>
     </div>
 
+    <div class="dialog" id="dialog" hidden onclick="if (event.target === this) closeDialog(false)">
+        <div class="dialog-box" role="dialog" aria-modal="true" aria-labelledby="dialogText">
+            <p id="dialogText"></p>
+            <input type="text" id="dialogInput" maxlength="200" hidden autocomplete="off" aria-labelledby="dialogText">
+            <div class="dialog-buttons">
+                <button class="dialog-cancel" id="dialogCancel" onclick="closeDialog(false)">Cancel</button>
+                <button id="dialogOk" onclick="closeDialog(true)">OK</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         const STORAGE_KEY = 'tuneBrotherTunes';
         const BACKUP_KEY = 'tuneBrotherLastBackup';
+
+        // ---- The app's own dialog box ----
+        // In place of the browser's plain alert, confirm and prompt boxes. ask() answers true or
+        // false, or with { input } the text typed (null if cancelled); notice() just tells.
+        let dialogDone = null;
+
+        function ask(message, { input = null, ok = 'OK', cancel = 'Cancel' } = {}) {
+            if (dialogDone) dialogDone(false);
+            const field = document.getElementById('dialogInput');
+            document.getElementById('dialogText').textContent = message;
+            field.hidden = input === null;
+            field.value = input ?? '';
+            document.getElementById('dialogOk').textContent = ok;
+            const cancelButton = document.getElementById('dialogCancel');
+            cancelButton.hidden = cancel === null;
+            cancelButton.textContent = cancel || '';
+            document.getElementById('dialog').hidden = false;
+            if (input === null) document.getElementById('dialogOk').focus();
+            else {
+                field.focus();
+                field.select();
+            }
+            return new Promise(resolve => {
+                dialogDone = answered => {
+                    document.getElementById('dialog').hidden = true;
+                    dialogDone = null;
+                    resolve(input === null ? answered : answered ? field.value : null);
+                };
+            });
+        }
+
+        function notice(message) {
+            return ask(message, { cancel: null });
+        }
+
+        function closeDialog(answered) {
+            if (dialogDone) dialogDone(answered);
+        }
+
+        document.addEventListener('keydown', event => {
+            if (document.getElementById('dialog').hidden) return;
+            if (event.key === 'Escape') closeDialog(false);
+            if (event.key === 'Enter' && event.target.id !== 'dialogCancel') {
+                event.preventDefault();
+                closeDialog(true);
+            }
+        });
+
 
         const KEYS = ['C', 'C♯', 'D', 'E♭', 'E', 'F', 'F♯', 'G', 'A♭', 'A', 'B♭', 'B'];
         const KEY_PARAMS = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
@@ -1528,7 +1724,6 @@
             { id: 'balkan', label: 'Balkan', color: 'var(--indigo)', words: ['balkan'] },
             { id: 'other', label: 'Other', color: 'var(--tan)', words: [] }
         ];
-        const STYLE_KEY = 'tunesLastStyle';
 
         function load(key, fallback) {
             try {
@@ -1663,17 +1858,22 @@
         let sortBy = load(SORT_KEY, 'name');
 
         function meterOf(tune) {
-            return METERS[tune.type] || { breakdown: '4/4', rag: '2/4', schottische: '4/4' }[tune.type] || 'other';
+            return METERS[tune.type] || { breakdown: '4/4', rag: '2/4', schottische: '4/4', polska: '3/4' }[tune.type] || 'other';
         }
 
-        // Unattributed tunes group as traditional
-        function authorOf(tune) {
-            const name = (tune.author || '').trim();
-            return !name || /^trad\.?$|^traditional$/i.test(name) ? 'Traditional' : name;
+        // A tune can have more than one author, kept as "Name & Name"
+        function authorsOf(text) {
+            return String(text || '').split(/\s+&\s+/).map(name => name.trim()).filter(Boolean);
+        }
+
+        // Each of a tune's authors, for sorting and filtering; unattributed tunes group as traditional
+        function authorGroups(tune) {
+            const names = authorsOf(tune.author).map(name => /^trad\.?$|^traditional$/i.test(name) ? 'Traditional' : name);
+            return names.length ? names : ['Traditional'];
         }
 
         function authorsInUse(list) {
-            const names = [...new Set(list.map(authorOf))].sort((a, b) => a.localeCompare(b));
+            const names = [...new Set(list.flatMap(authorGroups))].sort((a, b) => a.localeCompare(b));
             return [...names.filter(n => n !== 'Traditional'), ...names.filter(n => n === 'Traditional')];
         }
 
@@ -1721,16 +1921,16 @@
                 }).filter(group => group.tunes.length);
             }
             if (sortBy === 'tuning') {
-                // A tune in two tunings shows under both
-                return tuningsInUse(shown).map(id => ({
-                    label: tuningLabel(id), color: tuningColor(id),
-                    tunes: shown.filter(t => t.tunings.includes(id)).sort(byName)
+                // By family; a tune in two families (GDAE or AEAE) shows under both
+                return familiesInUse(shown).filter(f => !picks.tuning.length || picks.tuning.includes(f.key)).map(f => ({
+                    label: f.name, sub: f.ids.join(', '), color: f.color,
+                    tunes: shown.filter(t => t.tunings.some(id => familyOf(id) === f.key)).sort(byName)
                 }));
             }
             if (sortBy === 'author') {
                 return authorsInUse(shown).map((author, i) => ({
                     label: author, color: GROUP_COLORS[i % GROUP_COLORS.length],
-                    tunes: shown.filter(t => authorOf(t) === author).sort(byName)
+                    tunes: shown.filter(t => authorGroups(t).includes(author)).sort(byName)
                 }));
             }
             return [{ label: '', tunes: [...shown].sort(byName) }];
@@ -1772,6 +1972,30 @@
         // A tune marked for several tunings of one shape goes by the family's name in the list
         const FAMILY_WORDS = { '7-5-7': 'cross', '7-5-4': 'calico' };
 
+        // Tunings of one shape are one family: the same fingerings, moved to other strings. Sorting
+        // and filtering by tuning goes by family. The best-known families have a name of their
+        // own; the rest go by the names of the tunings in them (or the notes, if unnamed).
+        const FAMILY_NAMES = { '7-7-7': 'standard', '7-5-7': 'cross', '7-5-4': 'calico' };
+
+        function familyOf(id) {
+            return tuningShape(id) || id;
+        }
+
+        function familiesInUse(list) {
+            const families = [];
+            tuningsInUse(list).forEach(id => {
+                const key = familyOf(id);
+                const family = families.find(f => f.key === key);
+                if (family) family.ids.push(id);
+                else families.push({ key, ids: [id], color: tuningColor(id) });
+            });
+            families.forEach(f => {
+                const names = [...new Set(f.ids.map(id => (TUNINGS.find(t => t.id === id) || {}).name).filter(Boolean))];
+                f.name = FAMILY_NAMES[f.key] || (names.length ? names.join(' / ') : f.ids.join(', '));
+            });
+            return families;
+        }
+
         function familyWord(ids) {
             const shapes = new Set(ids.map(tuningShape));
             return ids.length > 1 && shapes.size === 1 ? FAMILY_WORDS[[...shapes][0]] || '' : '';
@@ -1803,8 +2027,8 @@
                 .filter(t => !picks.key.length || picks.key.includes(t.key))
                 .filter(t => !picks.mode.length || picks.mode.some(mode => modeKin(mode).includes(t.mode)))
                 .filter(t => !picks.meter.length || picks.meter.includes(meterOf(t)))
-                .filter(t => !picks.tuning.length || picks.tuning.some(id => t.tunings.includes(id)))
-                .filter(t => !picks.author.length || picks.author.includes(authorOf(t)))
+                .filter(t => !picks.tuning.length || t.tunings.some(id => picks.tuning.includes(familyOf(id))))
+                .filter(t => !picks.author.length || authorGroups(t).some(name => picks.author.includes(name)))
                 .filter(t => filterStatus === 'all' || t.status === filterStatus)
                 .filter(t => !query || searchText(t).includes(query));
 
@@ -1862,7 +2086,7 @@
             } else if (sortBy === 'author') {
                 items = authorsInUse(tunes).map((name, i) => [name, name, GROUP_COLORS[i % GROUP_COLORS.length]]);
             } else if (sortBy === 'tuning') {
-                items = tuningsInUse(tunes).map(id => [id, id, tuningColor(id)]);
+                items = familiesInUse(tunes).map(f => [f.key, f.name, f.color]);
             } else if (sortBy === 'meter') {
                 items = METER_ORDER.filter(meter => tunes.some(t => meterOf(t) === meter)).map((meter, i) => [meter, meter === 'other' ? 'Other' : meter, GROUP_COLORS[METER_ORDER.indexOf(meter) % GROUP_COLORS.length]]);
             }
@@ -2264,7 +2488,7 @@
                     return;
                 }
             }
-            alert("Couldn't find tunes that make a good set yet. Add a few more in the same style and meter.");
+            notice("Couldn't find tunes that make a good set yet. Add a few more in the same style and meter.");
         }
 
         // Old-time rules apply when every tune in the set is old-time
@@ -2300,7 +2524,7 @@
 
         function saveSet() {
             if (picked.length < 2) {
-                alert('Pick at least two tunes.');
+                notice('Pick at least two tunes.');
                 return;
             }
             const existing = editingSetId && sets.find(s => s.id === editingSetId);
@@ -2444,23 +2668,26 @@
         function openEditor(id, focus) {
             editingId = id;
             const tune = tunes.find(t => t.id === id);
-            const t = tune || { name: '', styles: [].concat(load(STYLE_KEY, [])).filter(Boolean), key: 2, mode: 'major', type: 'reel', tunings: ['GDAE'], status: 'solid', author: '', link: '', notes: '', links: [], photos: [] };
+            const t = tune || { name: '', styles: [], key: 2, mode: 'major', type: 'reel', tunings: ['GDAE'], status: 'solid', author: '', link: '', notes: '', links: [], photos: [] };
 
             document.getElementById('editorTitle').textContent = tune ? 'Edit Tune' : 'Add a Tune';
             document.getElementById('fName').value = t.name;
             editorStyles = [...t.styles];
             stylesMore = false;
             renderEditorStyles();
-            document.getElementById('fKey').innerHTML = options(['', ...KEYS.map((_, i) => i)], t.key === null ? '' : t.key, ['Not set', ...KEYS]);
-            document.getElementById('fMode').innerHTML = options(MODES, t.mode);
+            document.getElementById('fKey').innerHTML = options(['', ...KEYS.map((_, i) => i)], t.key === null ? '' : t.key, ['–', ...KEYS]);
+            renderModeOptions(t.mode);
+            document.getElementById('customModeRow').hidden = true;
             renderTypeOptions(t.type);
             document.getElementById('customTypeRow').hidden = true;
             editorTunings = [...t.tunings];
             document.getElementById('tuningMore').hidden = true;
             renderEditorTunings();
-            document.getElementById('fAuthor').value = t.author || '';
+            renderAuthorFields(authorsOf(t.author));
             document.getElementById('fChords').value = t.chords || '';
             document.getElementById('chordsFrom').hidden = true;
+            transposedBy = 0;
+            document.getElementById('transposeNote').hidden = true;
             document.getElementById('fLink').value = t.link || '';
             document.getElementById('fNotes').value = t.notes || '';
             editorStatus = t.status;
@@ -2481,6 +2708,7 @@
         }
 
         let editorStyles = [];
+        let transposedBy = 0;
         let editorTunings = [];
 
         // Tunings: the four common ones as buttons, plus any already used in the tunebook; "Other"
@@ -2521,7 +2749,7 @@
             const name = document.getElementById('customTuningName').value.trim();
             const notes = document.getElementById('customTuningNotes').value.trim().toUpperCase().replace('#', '♯');
             if (!notes && !name) {
-                alert('Give the tuning its notes (like ADAD), a name, or both.');
+                notice('Give the tuning its notes (like ADAD), a name, or both.');
                 return;
             }
             const id = notes && name ? `${notes} (${name})` : notes || name;
@@ -2550,15 +2778,59 @@
             document.getElementById('customStyleRow').hidden = !stylesMore;
         }
 
-        // Tune types: the built-in list plus any you've named, and "Name your own…" to add one
+        // Tune types: the usual few, then any already in your tunebook (named by you or brought in
+        // from The Session), and "Name your own…" to add one
+        const MENU_TYPES = ['reel', 'jig', 'slip jig', 'waltz', 'slide', 'polka', 'march', 'three-two', 'polska', 'schottische'];
+
         function typesInUse() {
-            return [...new Set(tunes.map(t => t.type))].filter(type => !TYPES.includes(type)).sort();
+            return [...new Set(tunes.map(t => t.type))].filter(type => type && !MENU_TYPES.includes(type)).sort();
         }
 
         function renderTypeOptions(selected) {
-            const all = [...TYPES.filter(type => type !== 'other'), ...typesInUse(), 'other'];
-            if (selected && !all.includes(selected)) all.splice(all.length - 1, 0, selected);
+            const all = [...MENU_TYPES, ...typesInUse()];
+            if (selected && selected !== '__new' && !all.includes(selected)) all.push(selected);
             document.getElementById('fType').innerHTML = options([...all, '__new'], selected, [...all, 'Name your own…']);
+        }
+
+        // Modes: the usual ones, any of your own already in use, and "Name your own…"
+        function renderModeOptions(selected) {
+            const all = [...MODES, ...[...new Set(tunes.map(t => t.mode))].filter(m => m && !MODES.includes(m)).sort()];
+            if (selected && selected !== '__new' && !all.includes(selected)) all.push(selected);
+            document.getElementById('fMode').innerHTML = options([...all, '__new'], selected, [...all, 'Name your own…']);
+        }
+
+        function modeChosen(select) {
+            const naming = select.value === '__new';
+            document.getElementById('customModeRow').hidden = !naming;
+            if (naming) document.getElementById('customModeName').focus();
+        }
+
+        function addCustomMode() {
+            const name = document.getElementById('customModeName').value.trim().toLowerCase().slice(0, 30);
+            if (!name) {
+                notice('Give the mode a name.');
+                return;
+            }
+            renderModeOptions(name);
+            document.getElementById('customModeName').value = '';
+            document.getElementById('customModeRow').hidden = true;
+        }
+
+        function renderAuthorFields(names) {
+            const list = names.length ? names : [''];
+            document.getElementById('authorList').innerHTML = list.map((name, i) =>
+                `<input type="text" id="fAuthor${i}" class="author-field" maxlength="120" placeholder="${i ? 'Another author' : 'Jay Ungar, or trad.'}" value="${escapeHTML(name)}" aria-label="Author ${i + 1}">`
+            ).join('');
+        }
+
+        function authorFieldValues() {
+            return [...document.querySelectorAll('.author-field')].map(input => input.value.trim()).filter(Boolean);
+        }
+
+        function addAuthorField() {
+            const names = [...document.querySelectorAll('.author-field')].map(input => input.value);
+            renderAuthorFields([...names, '']);
+            document.getElementById(`fAuthor${names.length}`).focus();
         }
 
         function typeChosen(select) {
@@ -2570,7 +2842,7 @@
         function addCustomType() {
             const name = document.getElementById('customTypeName').value.trim().toLowerCase().slice(0, 30);
             if (!name) {
-                alert('Give the type a name.');
+                notice('Give the type a name.');
                 return;
             }
             renderTypeOptions(name);
@@ -2581,7 +2853,7 @@
         function addCustomStyle() {
             const name = document.getElementById('customStyleName').value.trim().slice(0, 30);
             if (!name) {
-                alert('Give the style a name.');
+                notice('Give the style a name.');
                 return;
             }
             // Typing the name of a built-in style picks that one
@@ -2612,20 +2884,22 @@
         function saveTune() {
             const name = document.getElementById('fName').value.trim();
             if (!name) {
-                alert('Give the tune a name.');
+                notice('Give the tune a name.');
                 return;
             }
             const fields = {
                 name: titleCase(name),
                 key: document.getElementById('fKey').value === '' ? null : Number(document.getElementById('fKey').value),
-                mode: document.getElementById('fMode').value,
+                mode: document.getElementById('fMode').value === '__new'
+                    ? (document.getElementById('customModeName').value.trim().toLowerCase().slice(0, 30) || 'other')
+                    : document.getElementById('fMode').value,
                 type: document.getElementById('fType').value === '__new'
                     ? (document.getElementById('customTypeName').value.trim().toLowerCase().slice(0, 30) || 'other')
                     : document.getElementById('fType').value,
                 tunings: editorTunings.length ? [...editorTunings] : ['GDAE'],
                 styles: [...editorStyles],
                 status: editorStatus,
-                author: titleCase(document.getElementById('fAuthor').value.trim()),
+                author: titleCase(authorFieldValues().join(' & ')),
                 chords: document.getElementById('fChords').value.trim(),
                 link: document.getElementById('fLink').value.trim(),
                 notes: document.getElementById('fNotes').value.trim(),
@@ -2636,7 +2910,6 @@
             const before = editingId ? (tunes.find(t => t.id === editingId).photos || []) : [];
             before.filter(id => !editorPhotos.includes(id)).forEach(id => dropPhoto(id).catch(() => {}));
 
-            if (fields.styles.length) localStorage.setItem(STYLE_KEY, JSON.stringify(fields.styles));
             if (editingId) {
                 Object.assign(tunes.find(t => t.id === editingId), fields, { updated: Date.now() });
             } else {
@@ -2649,10 +2922,10 @@
             returnFromEditor();
         }
 
-        function deleteTune() {
+        async function deleteTune() {
             editorReturn = null;
             const tune = tunes.find(t => t.id === editingId);
-            if (!confirm(`Delete "${tune.name}"?`)) return;
+            if (!(await ask(`Delete "${tune.name}"?`, { ok: 'Delete' }))) return;
             tunes = tunes.filter(t => t.id !== editingId);
             forget(editingId);
             save();
@@ -2772,7 +3045,7 @@
         function lookUpSession() {
             const query = document.getElementById('fName').value.trim();
             if (!query) {
-                alert("Type the tune's name first.");
+                notice("Type the tune's name first.");
                 return;
             }
             searchSession(query);
@@ -2837,10 +3110,10 @@
             document.getElementById('fName').value = tune.name;
             document.getElementById('fKey').value = key;
             document.getElementById('fMode').value = mode;
-            if (TYPES.includes(tune.type)) document.getElementById('fType').value = tune.type;
-            if (!editorStyles.length) {
-                editorStyles = ['irish'];
-                renderEditorStyles();
+            // The Session's type goes in the menu even when it isn't one of the usual ones
+            if (tune.type) {
+                renderTypeOptions(tune.type);
+                document.getElementById('fType').value = tune.type;
             }
             if (!editorLinks.some(l => l.tune === Number(tune.id) && l.setting === Number(setting.id))) {
                 editorLinks.push({ tune: Number(tune.id), setting: Number(setting.id), number: index + 1, name: tune.name, abc: buildAbc(tune.name, tune.type, setting.key, setting.abc, false) });
@@ -2920,7 +3193,7 @@
         function addPastedAbc() {
             const abc = normalizeAbc(document.getElementById('abcText').value);
             if (!abc) {
-                alert('Paste some ABC first.');
+                notice('Paste some ABC first.');
                 return;
             }
             editorLinks.push({ kind: 'abc', name: 'ABC', abc });
@@ -2994,7 +3267,7 @@
                     await putPhoto(id, blob);
                     editorPhotos.push(id);
                 } catch (err) {
-                    alert(err.message || "Couldn't add that photo.");
+                    notice(err.message || "Couldn't add that photo.");
                 }
             }
             renderSessionLinked();
@@ -3170,19 +3443,82 @@
             return { parts: chordsFromAbc(link.abc), from: link.kind === 'abc' ? 'the pasted ABC' : `The Session${link.number ? `, setting ${link.number}` : ''}` };
         }
 
+        // ---- Chords as numbers ----
+        // Letters, or numbers counted from the key (Nashville style: 1, 4, 5, 6m, ♭7). For a tune
+        // in a minor-ish mode, 1 can be its own tonic (E minor: Em is 1m) or its relative major's
+        // (Em is 6m). The choice is remembered for every tune.
+
+        const CHORD_VIEW_KEY = 'tunesChordView';
+        let chordView = load(CHORD_VIEW_KEY, { numbers: false, fromMajor: false });
+
+        const DEGREES = ['1', '♭2', '2', '♭3', '3', '4', '♯4', '5', '♭6', '6', '♭7', '7'];
+        // How far above its relative major's tonic each mode's tonic sits
+        const MODE_FROM_MAJOR = { major: 0, mixolydian: 7, modal: 7, dorian: 2, minor: 9 };
+        const NOTE_NAMES = { sharp: ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'], flat: ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'] };
+        const CHORD_PARTS = /^([A-G](?:#|b|♯|♭)?)(.*?)(?:\/([A-G](?:#|b|♯|♭)?))?$/;
+
+        function pitchOf(note) {
+            return ((NOTE_INDEX[note[0]] + (/[#♯]/.test(note) ? 1 : /[b♭]/.test(note.slice(1)) ? -1 : 0)) + 12) % 12;
+        }
+
+        // Each chord in a bar's text, with any "1." or "2." ending mark kept in front
+        function mapChords(barText, change) {
+            return barText.split(' ').map(token => {
+                const [, mark, chord] = token.match(/^(\d\.)?(.*)$/);
+                const parts = chord.match(CHORD_PARTS);
+                return parts ? (mark || '') + change(parts) : token;
+            }).join(' ');
+        }
+
+        function chordHome(tune) {
+            const shift = chordView.fromMajor ? MODE_FROM_MAJOR[tune.mode] || 0 : 0;
+            return (tune.key - shift + 12) % 12;
+        }
+
+        // Extensions are raised, so B7 in E is 5⁷, not 57
+        const RAISED = '⁰¹²³⁴⁵⁶⁷⁸⁹';
+
+        function asNumbers(barText, home) {
+            return mapChords(barText, ([, root, rest, bass]) =>
+                DEGREES[(pitchOf(root) - home + 12) % 12] + rest.replace(/\d/g, d => RAISED[d]) + (bass ? '/' + DEGREES[(pitchOf(bass) - home + 12) % 12] : ''));
+        }
+
+        function setChordView(changes) {
+            chordView = { ...chordView, ...changes };
+            localStorage.setItem(CHORD_VIEW_KEY, JSON.stringify(chordView));
+            document.querySelectorAll('.chord-chart[data-tune]').forEach(chart => {
+                const tune = tunes.find(t => t.id === chart.dataset.tune);
+                if (tune) chart.outerHTML = chordChartHtml(tune);
+            });
+        }
+
+        function chordViewButtons(tune) {
+            if (tune.key === null) return '';
+            const chip = (on, label, change) => `<button class="chip small chord-view${on ? ' selected' : ''}" onclick='setChordView(${JSON.stringify(change)})' aria-pressed="${on}">${label}</button>`;
+            const relative = MODE_FROM_MAJOR[tune.mode];
+            const major = relative ? KEYS[(tune.key - relative + 12) % 12] : null;
+            return `<div class="chord-views">
+                ${chip(!chordView.numbers, 'A B C', { numbers: false })}${chip(chordView.numbers, '1 4 5', { numbers: true })}
+                ${chordView.numbers && major ? `<span class="chord-views-gap"></span>${chip(!chordView.fromMajor, `1 = ${KEYS[tune.key]}`, { fromMajor: false })}${chip(chordView.fromMajor, `1 = ${major}`, { fromMajor: true })}` : ''}
+            </div>`;
+        }
+
         function chordChartHtml(tune) {
             const chart = chartFor(tune);
             const sessionLinked = tune.links.some(l => l.tune);
             if (!chart || !chart.parts.length) {
                 return sessionLinked ? `<p class="page-meta chords-none">No chords yet. <button class="link-btn" onclick="findChords('${tune.id}')">Find chords on The Session</button> or <button class="link-btn" onclick="editFromPage('${tune.id}')">write your own</button></p>` : '';
             }
+            const numbers = chordView.numbers && tune.key !== null;
+            const show = bar => numbers ? asNumbers(bar, chordHome(tune)) : bar;
             return `
-                <div class="chord-chart">
+                <div class="chord-chart" data-tune="${tune.id}">
                     <div class="chord-head"><span class="sub-label">Chords</span><span class="chip-key">from ${escapeHTML(chart.from)}</span><button class="link-btn chords-edit" onclick="editFromPage('${tune.id}', 'chords')">edit</button></div>
+                    ${chordViewButtons(tune)}
                     ${chart.parts.map(p => `
                         <div class="chord-part">
                             ${p.label ? `<span class="chord-label">${escapeHTML(p.label)}</span>` : ''}
-                            ${barRowsHtml(p.bars, b => `<span>${escapeHTML(b)}</span>`)}
+                            ${barRowsHtml(p.bars, b => `<span>${escapeHTML(show(b))}</span>`)}
                         </div>`).join('')}
                 </div>`;
         }
@@ -3211,13 +3547,13 @@
             }
         }
 
-        function copyChordsFromDots() {
+        async function copyChordsFromDots() {
             const link = editorLinks.find(l => hasChords(l.abc));
             if (!link) {
-                alert('None of the sheet music on this tune has chords in it yet.');
+                notice('None of the sheet music on this tune has chords in it yet.');
                 return;
             }
-            if (document.getElementById('fChords').value.trim() && !confirm('Replace the chords in the box with the ones from the sheet music?')) return;
+            if (document.getElementById('fChords').value.trim() && !(await ask('Replace the chords in the box with the ones from the sheet music?', { ok: 'Replace' }))) return;
             document.getElementById('fChords').value = chordText(chordsFromAbc(link.abc));
             document.getElementById('chordsFrom').hidden = false;
             renderChordGrid();
@@ -3258,6 +3594,27 @@
                 </div>`).join('');
         }
 
+        // Transpose the whole chart by half steps. The key moves with it (so numbers still line
+        // up); the spelling follows the new key, flats in flat keys. The sheet music stays as it is.
+        function transposeChords(steps) {
+            const keySelect = document.getElementById('fKey');
+            const key = keySelect.value === '' ? null : (Number(keySelect.value) + steps + 12) % 12;
+            const mode = document.getElementById('fMode').value;
+            const major = key === null ? null : (key - (MODE_FROM_MAJOR[mode] || 0) + 12) % 12;
+            const names = [5, 10, 3, 8, 1].includes(major) ? NOTE_NAMES.flat : NOTE_NAMES.sharp;
+            const move = note => names[(pitchOf(note) + steps + 12) % 12];
+            const parts = editorChordParts();
+            parts.forEach(p => p.bars = p.bars.map(bar => mapChords(bar, ([, root, rest, bass]) => move(root) + rest + (bass ? '/' + move(bass) : ''))));
+            if (key !== null) keySelect.value = key;
+            writeChordParts(parts);
+            transposedBy = (transposedBy + steps + 12) % 12;
+            const note = document.getElementById('transposeNote');
+            note.hidden = !transposedBy;
+            if (transposedBy) note.textContent = key === null
+                ? 'Chords moved. The sheet music stays in its own key.'
+                : `Chords and key moved to ${KEYS[key]}. The sheet music stays in its own key.`;
+        }
+
         function shiftChordPart(i, direction) {
             const parts = editorChordParts();
             const bars = parts[i].bars;
@@ -3266,10 +3623,10 @@
             writeChordParts(parts);
         }
 
-        function editChordBar(i, j) {
+        async function editChordBar(i, j) {
             const parts = editorChordParts();
             const now = parts[i].bars[j];
-            const text = prompt(`Bar ${j + 1}${parts[i].label ? ' of ' + parts[i].label : ''}: chords (two in a bar: "A D"; blank to hold the last one)`, now === '·' ? '' : now);
+            const text = await ask(`Bar ${j + 1}${parts[i].label ? ' of ' + parts[i].label : ''}: its chords. Two in a bar: "A D". Leave it blank to hold the last one.`, { input: now === '·' ? '' : now });
             if (text === null) return;
             parts[i].bars[j] = text.trim() ? text.trim().split(/\s+/).map(splitBar).join(' ') : '·';
             writeChordParts(parts);
@@ -3609,7 +3966,7 @@
         async function connectSync(token) {
             token = (token || document.getElementById('syncToken').value).trim();
             if (!token) {
-                alert('Paste your GitHub token first.');
+                notice('Paste your GitHub token first.');
                 return;
             }
             try {
@@ -3627,7 +3984,7 @@
                 document.getElementById('syncToken').value = '';
                 await syncNow(false);
             } catch (err) {
-                alert(err.message || 'Could not reach GitHub.');
+                notice(err.message || 'Could not reach GitHub.');
             }
             renderSync();
         }
@@ -3637,8 +3994,8 @@
             if (gas && gas.token) return connectSync(gas.token);
         }
 
-        function disconnectSync() {
-            if (!confirm('Turn off sync on this device? Your tunes stay here, and the copy on GitHub stays too.')) return;
+        async function disconnectSync() {
+            if (!(await ask('Turn off sync on this device? Your tunes stay here, and the copy on GitHub stays too.', { ok: 'Turn off' }))) return;
             setSyncConfig(null);
             renderSync();
         }
@@ -3647,9 +4004,9 @@
             const config = syncConfig();
             try {
                 await navigator.clipboard.writeText(config.token);
-                alert('Token copied. Paste it into Tunes on your other device (on an iPhone next to a Mac, it usually pastes straight across).');
+                notice('Token copied. Paste it into Tunes on your other device (on an iPhone next to a Mac, it usually pastes straight across).');
             } catch (err) {
-                prompt('Copy this token:', config.token);
+                ask('Copy this token:', { input: config.token, cancel: null });
             }
         }
 
@@ -3714,7 +4071,7 @@
                     await navigator.share({ files: [file], title: 'Tunes backup' });
                     markBackedUp();
                 } catch (err) {
-                    if (err.name !== 'AbortError') alert('Could not share backup: ' + err.message);
+                    if (err.name !== 'AbortError') notice('Could not share backup: ' + err.message);
                 }
                 return;
             }
@@ -3769,7 +4126,7 @@
             const file = event.target.files[0];
             if (!file) return;
             const reader = new FileReader();
-            reader.onload = e => {
+            reader.onload = async e => {
                 let imported;
                 let importedSets = [];
                 try {
@@ -3777,14 +4134,14 @@
                     imported = cleanTunes(data);
                     importedSets = cleanSets(data);
                 } catch (err) {
-                    alert('Could not read that file: ' + err.message);
+                    notice('Could not read that file: ' + err.message);
                     return;
                 }
                 if (!imported) {
-                    alert("That doesn't look like a Tunes backup.");
+                    notice("That doesn't look like a Tunes backup.");
                     return;
                 }
-                if (!confirm(`Restore ${imported.length} tunes? They'll be merged with what's already here (tunes you already have are skipped).`)) return;
+                if (!(await ask(`Restore ${imported.length} tunes? They'll be merged with what's already here (tunes you already have are skipped).`, { ok: 'Restore' }))) return;
                 const ids = new Set(tunes.map(t => t.id));
                 const names = new Set(tunes.map(t => t.name.toLowerCase()));
                 const fresh = imported.filter(t => !ids.has(t.id) && !names.has(t.name.toLowerCase()));
@@ -3799,7 +4156,7 @@
                 saveSets();
                 renderList();
                 renderSets();
-                alert(`Added ${fresh.length} new tunes.`);
+                notice(`Added ${fresh.length} new tunes.`);
             };
             reader.readAsText(file);
             event.target.value = '';
