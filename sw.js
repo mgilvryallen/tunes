@@ -1,6 +1,6 @@
 // Offline support: the page from the network when it can, everything else from cache.
 // Bump CACHE when files are added or removed.
-const CACHE = 'tunes-v15';
+const CACHE = 'tunes-v16';
 const FILES = [
     './',
     'index.html',
