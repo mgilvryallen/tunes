@@ -943,6 +943,68 @@
             font-weight: normal;
         }
 
+        .note-change {
+            margin-top: 6px;
+        }
+
+        .note-picked {
+            font-size: 14px;
+            color: var(--muted);
+            margin: 8px 0 6px;
+            min-height: 1.4em;
+        }
+
+        .note-picked code,
+        .note-text {
+            font-family: ui-monospace, Menlo, monospace;
+        }
+
+        .note-tools {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 12px;
+            margin-bottom: 10px;
+        }
+
+        .note-tools span {
+            display: inline-flex;
+        }
+
+        .note-tools .small-btn {
+            min-width: 44px;
+            min-height: 40px;
+        }
+
+        .note-tools .small-btn + .small-btn {
+            border-left: none;
+        }
+
+        .note-text {
+            width: 100%;
+            min-height: 160px;
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+
+        .note-done {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-top: 6px;
+        }
+
+        .note-done .btn {
+            width: auto;
+            flex: 0 0 auto;
+            margin-bottom: 0;
+            padding: 10px 22px;
+        }
+
+        #noteEditMusic .abcjs-note,
+        #noteEditMusic .abcjs-rest {
+            cursor: pointer;
+        }
+
         .music-add {
             display: flex;
             flex-wrap: wrap;
@@ -1475,15 +1537,17 @@
             <div class="sub-label">Sheet music</div>
             <div class="music-add">
                 <button class="small-btn" onclick="lookUpSession()">Find on The Session</button>
+                <button class="small-btn" onclick="lookElsewhere()">Look elsewhere</button>
                 <button class="small-btn" onclick="toggleAbcPaste()">Paste ABC</button>
                 <button class="small-btn" onclick="document.getElementById('photoFile').click()">Add a photo</button>
                 <input type="file" id="photoFile" accept="image/*" multiple hidden onchange="photoChosen(event)">
             </div>
             <div class="session-linked" id="sessionLinked" hidden></div>
             <div class="abc-paste" id="abcPaste" hidden>
-                <textarea id="abcText" oninput="abcTyped()" placeholder="Paste ABC from abcnotation.com, the Traditional Tune Archive, an email…" aria-label="ABC notation"></textarea>
+                <textarea id="abcText" oninput="abcTyped()" placeholder="Paste ABC from abcnotation.com, the Traditional Tune Archive, an email… or a link to a tune on The Session, the Tune Archive or GitHub" aria-label="ABC notation"></textarea>
                 <div class="session-preview" id="abcPreview"></div>
                 <button class="small-btn" onclick="addPastedAbc()">Add these dots</button>
+                <button class="small-btn" onclick="pasteClipboard()">Paste from clipboard</button>
                 <button class="link-btn" onclick="toggleAbcPaste()">cancel</button>
             </div>
             <div class="sub-label">Styles</div>
@@ -1864,7 +1928,7 @@
         // tune.prefer names the one to use in sets and to open first ('l2' = link 2, 'p<id>' = photo).
         function musicSources(tune) {
             return [
-                ...tune.links.map((l, i) => ({ kind: 'abc', link: i, key: 'l' + i, abc: l.abc, label: l.kind === 'abc' ? 'ABC' : `Setting ${l.number || i + 1}` })).filter(x => x.abc),
+                ...tune.links.map((l, i) => ({ kind: 'abc', link: i, key: 'l' + i, abc: l.abc, label: l.kind === 'abc' ? (l.name || 'ABC') : `Setting ${l.number || i + 1}` })).filter(x => x.abc),
                 ...tune.photos.map((id, i) => ({ kind: 'photo', id, key: 'p' + id, label: `Photo ${i + 1}` }))
             ];
         }
@@ -2291,6 +2355,7 @@
                 const link = tune && tune.links[Number(element.dataset.link || 0)];
                 if (link && link.abc) drawMusic(element, element.dataset.nochords ? withoutChords(link.abc) : link.abc, tune.dotsShift);
             });
+            if (root.querySelector('#noteEditMusic')) drawNoteEdit();
         }
 
         function changeDensity(direction) {
@@ -2357,6 +2422,295 @@
             showPageSource(pageSource);
         }
 
+        // ---- Changing notes ----
+        // The dots are ABC text, and abcjs says which characters each drawn note came from, so a
+        // tapped note can be rewritten in place: moved up or down (or dragged), sharpened, made
+        // longer or shorter, split in two, joined to the next, turned into a rest, copied or
+        // deleted. Saving keeps the version from before your first change, to put back later.
+
+        let noteEdit = null;    // { tuneId, link, abc, history, sel: { start, end } }
+        let lastPointer = { downY: 0, upY: 0 };
+        const NOTE_TOKEN = /^((?:"[^"]*"|![^!]*!|\+[^+]*\+|\{[^}]*\}|[~.HLMOPSTuv]|\s)*)(\[[^\]]*\]|(?:\^\^|__|\^|_|=)?[A-Ga-g][,']*|[zx])(\d*\/*\d*)(-?)([\s\S]*)$/;
+        const NEXT_NOTE = /^([ \t]*)((?:"[^"]*"|![^!]*!|[~.])*)(\[[^\]]*\]|(?:\^\^|__|\^|_|=)?[A-Ga-g][,']*|[zx])(\d*\/*\d*)(-?)/;
+        const PITCH = /(\^\^|__|\^|_|=)?([A-Ga-g])([,']*)/g;
+        const LETTERS = 'CDEFGAB';
+
+        // A diatonic step up or down: B to c, C to B, (accidentals dropped, so the key decides)
+        function stepPitch(letter, marks, steps) {
+            let octave = letter === letter.toLowerCase() ? 1 : 0;
+            for (const c of marks) octave += c === "'" ? 1 : -1;
+            const index = octave * 7 + LETTERS.indexOf(letter.toUpperCase()) + steps;
+            const o = Math.floor(index / 7);
+            const name = LETTERS[((index % 7) + 7) % 7];
+            return o >= 1 ? name.toLowerCase() + "'".repeat(o - 1) : name + ','.repeat(-o);
+        }
+
+        // "3/2" -> [3, 2]; "" -> [1, 1]; "/" -> [1, 2]; "//" -> [1, 4]
+        function parseLength(text) {
+            const m = String(text).match(/^(\d*)(\/*)(\d*)$/);
+            if (!m) return [1, 1];
+            const num = m[1] ? Number(m[1]) : 1;
+            const den = m[2] ? (m[3] ? Number(m[3]) * 2 ** (m[2].length - 1) : 2 ** m[2].length) : 1;
+            return [num, den];
+        }
+
+        function formatLength([num, den]) {
+            const gcd = (a, b) => b ? gcd(b, a % b) : a;
+            const g = gcd(num, den);
+            num /= g;
+            den /= g;
+            if (den === 1) return num === 1 ? '' : String(num);
+            if (num === 1) return den === 2 ? '/' : '/' + den;
+            return `${num}/${den}`;
+        }
+
+        const NOTE_ACTIONS = {
+            up: m => m[2].match(/^[zx]$/) ? null : { text: m[1] + m[2].replace(PITCH, (w, acc, l, o) => stepPitch(l, o, 1)) + m[3] + m[4] + m[5] },
+            down: m => m[2].match(/^[zx]$/) ? null : { text: m[1] + m[2].replace(PITCH, (w, acc, l, o) => stepPitch(l, o, -1)) + m[3] + m[4] + m[5] },
+            sharp: m => accidental(m, '^'),
+            flat: m => accidental(m, '_'),
+            natural: m => accidental(m, '='),
+            longer: m => {
+                const [n, d] = parseLength(m[3]);
+                return { text: m[1] + m[2] + formatLength(n >= d ? [n + d, d] : [n * 2, d]) + m[4] + m[5] };
+            },
+            shorter: m => {
+                const [n, d] = parseLength(m[3]);
+                if (n / d <= 1 / 8) return null;
+                return { text: m[1] + m[2] + formatLength(n > d ? [n - d, d] : [n, d * 2]) + m[4] + m[5] };
+            },
+            // A dotted note splits long-then-short (A3 -> A2A); anything else in halves
+            split: m => {
+                const [n, d] = parseLength(m[3]);
+                const [a, b] = d === 1 && n > 2 && n % 2 ? [[n - 1, 1], [1, 1]] : [[n, d * 2], [n, d * 2]];
+                const first = m[1] + m[2] + formatLength(a);
+                return { text: first + m[2] + formatLength(b) + m[4] + m[5], length: first.length };
+            },
+            rest: m => ({ text: m[1] + (/^[zx]$/.test(m[2]) ? 'B' : 'z') + m[3] + m[5] }),
+            copy: m => {
+                const first = m[1] + m[2] + m[3] + m[4];
+                return { text: first + m[2] + m[3] + m[4] + m[5], start: first.length };
+            },
+            // A chord symbol on a deleted note stays, to go with the next one
+            remove: m => ({ text: (m[1].match(/"[^"]*"/g) || []).join('') + m[5], gone: true })
+        };
+
+        function accidental(m, sign) {
+            if (!/^(\^\^|__|\^|_|=)?[A-Ga-g]/.test(m[2])) return null;
+            const bare = m[2].replace(/^(\^\^|__|\^|_|=)/, '');
+            return { text: m[1] + (m[2].startsWith(sign) && !m[2].startsWith(sign + sign) ? '' : sign) + bare + m[3] + m[4] + m[5] };
+        }
+
+        function startNoteEdit(tuneId, linkIndex) {
+            const tune = tunes.find(t => t.id === tuneId);
+            const link = tune && tune.links[linkIndex];
+            if (!link || !link.abc) return;
+            noteEdit = { tuneId, link: linkIndex, abc: link.abc, history: [], sel: null, text: false };
+            renderTunePage();
+            drawAllMusic(document.getElementById('tunePage'));
+        }
+
+        function noteEditHtml(tune) {
+            const button = (action, label, aria) => `<button class="small-btn" onclick="changeNote('${action}')" aria-label="${aria}">${label}</button>`;
+            return `
+                <div class="note-editor">
+                    <p class="prefer-note">Tap a note, then change it below. You can also drag a note up or down.${tune.dotsShift ? ' (Shown as written, without your transposing.)' : ''}</p>
+                    <div class="page-music" id="noteEditMusic"></div>
+                    <p class="note-picked" id="notePicked"></p>
+                    <div class="note-tools">
+                        <span>${button('up', '▲', 'Move the note up a step')}${button('down', '▼', 'Move the note down a step')}</span>
+                        <span>${button('sharp', '♯', 'Sharp')}${button('flat', '♭', 'Flat')}${button('natural', '♮', 'Natural')}</span>
+                        <span>${button('longer', 'Longer', 'Make the note longer')}${button('shorter', 'Shorter', 'Make the note shorter')}</span>
+                        <span>${button('split', 'Split', 'Split the note in two')}${button('join', 'Join', 'Join the note with the next one')}</span>
+                        <span>${button('copy', 'Copy', 'Copy the note after itself')}${button('rest', 'Rest', 'Turn the note into a rest, or a rest into a note')}${button('remove', 'Delete', 'Delete the note')}</span>
+                        <span><button class="small-btn" onclick="undoNote()" aria-label="Undo">↶ Undo</button></span>
+                    </div>
+                    <p class="prefer-note"><button class="link-btn" onclick="toggleNoteText()">${noteEdit.text ? 'hide the ABC text' : 'edit the ABC text'}</button></p>
+                    ${noteEdit.text ? `<textarea class="note-text" id="noteEditText" oninput="noteTextTyped()" aria-label="ABC notation" spellcheck="false" autocapitalize="off">${escapeHTML(noteEdit.abc)}</textarea>` : ''}
+                    <div class="note-done">
+                        <button class="btn" onclick="finishNoteEdit(true)">Save Notes</button>
+                        <button class="link-btn" onclick="finishNoteEdit(false)">cancel</button>
+                    </div>
+                </div>`;
+        }
+
+        function drawNoteEdit() {
+            const element = document.getElementById('noteEditMusic');
+            if (!element || !noteEdit) return;
+            const perLine = barsPerLine(element.clientWidth || 330);
+            ensureAbcjs().then(() => {
+                const [visual] = window.ABCJS.renderAbc(element, noteEdit.abc, {
+                    responsive: 'resize', staffwidth: 40 + 165 * perLine,
+                    wrap: { minSpacing: 1.8, maxSpacing: 2.7, preferredMeasuresPerLine: perLine },
+                    paddingleft: 0, paddingright: 0, foregroundColor: '#2c2416',
+                    add_classes: true, dragging: true, selectionColor: '#a0522d', dragColor: '#a0522d',
+                    clickListener: noteClicked
+                });
+                noteEdit.visual = visual;
+                if (noteEdit.sel && visual) visual.engraver.rangeHighlight(noteEdit.sel.start, noteEdit.sel.end);
+                showPicked();
+            }).catch(() => { element.textContent = "Couldn't draw the notation."; });
+            if (!element.dataset.pointer) {
+                element.dataset.pointer = '1';
+                element.addEventListener('pointerdown', e => { lastPointer.downY = e.clientY; }, true);
+                element.addEventListener('pointerup', e => { lastPointer.upY = e.clientY; }, true);
+                // (a touch drag can cancel its pointer events partway, so touches count too)
+                element.addEventListener('touchstart', e => { lastPointer.downY = e.touches[0].clientY; }, { capture: true, passive: true });
+                element.addEventListener('touchend', e => { lastPointer.upY = e.changedTouches[0].clientY; }, { capture: true, passive: true });
+            }
+        }
+
+        function noteClicked(element, tuneNumber, classes, analysis, drag) {
+            if (!noteEdit || !element || element.el_type !== 'note' || !(element.startChar >= 0)) return;
+            noteEdit.sel = { start: element.startChar, end: element.endChar };
+            // A drag moves the note by the steps it went (up is negative); a tap just picks it
+            const moved = Math.abs(lastPointer.upY - lastPointer.downY) > 4;
+            if (drag && drag.step && moved && !element.rest) {
+                const steps = -drag.step;
+                editNote(m => {
+                    if (/^[zx]$/.test(m[2])) return null;
+                    return { text: m[1] + m[2].replace(PITCH, (w, acc, l, o) => stepPitch(l, o, steps)) + m[3] + m[4] + m[5] };
+                });
+                return;
+            }
+            showPicked();
+        }
+
+        function showPicked() {
+            const picked = document.getElementById('notePicked');
+            if (!picked || !noteEdit) return;
+            picked.innerHTML = noteEdit.sel
+                ? `Picked: <code>${escapeHTML(noteEdit.abc.slice(noteEdit.sel.start, noteEdit.sel.end).trim())}</code>`
+                : 'No note picked yet.';
+        }
+
+        // Rewrites the picked note with fn(match), keeping the change for undo
+        function editNote(fn) {
+            if (!noteEdit || !noteEdit.sel) {
+                notice('Tap a note first.');
+                return false;
+            }
+            const { start, end } = noteEdit.sel;
+            const m = noteEdit.abc.slice(start, end).match(NOTE_TOKEN);
+            const result = m && fn(m);
+            if (!result) return false;
+            commitNote(noteEdit.abc.slice(0, start) + result.text + noteEdit.abc.slice(end),
+                result.gone ? null : { start: start + (result.start || 0), length: result.length });
+            return true;
+        }
+
+        function commitNote(abc, sel) {
+            noteEdit.history.push({ abc: noteEdit.abc, sel: noteEdit.sel });
+            noteEdit.abc = abc;
+            // The picked note is re-found by where it starts (its new length comes from the redraw)
+            noteEdit.sel = sel ? { start: sel.start, end: sel.start + (sel.length || noteTokenLength(abc, sel.start)) } : null;
+            const text = document.getElementById('noteEditText');
+            if (text) text.value = abc;
+            drawNoteEdit();
+        }
+
+        // How far the note starting here runs: its chord symbol and decorations, pitch, length, tie
+        function noteTokenLength(abc, start) {
+            const m = abc.slice(start).match(/^((?:"[^"]*"|![^!]*!|\+[^+]*\+|\{[^}]*\}|[~.HLMOPSTuv])*)(\[[^\]]*\]|(?:\^\^|__|\^|_|=)?[A-Ga-g][,']*|[zx])(\d*\/*\d*)(-?)/);
+            return m ? m[0].length : 1;
+        }
+
+        function changeNote(action) {
+            if (action === 'join') return joinNote();
+            if (!editNote(NOTE_ACTIONS[action]) && noteEdit && noteEdit.sel) {
+                if (action === 'shorter') notice("That's as short as it goes.");
+                else if (['sharp', 'flat', 'natural', 'up', 'down'].includes(action)) notice("That's a rest. Tap Rest to make it a note.");
+            }
+        }
+
+        // The picked note and the one right after it in the bar become one, as long as both
+        function joinNote() {
+            if (!noteEdit || !noteEdit.sel) {
+                notice('Tap a note first.');
+                return;
+            }
+            const { start, end } = noteEdit.sel;
+            const m = noteEdit.abc.slice(start, end).match(NOTE_TOKEN);
+            const next = noteEdit.abc.slice(end).match(NEXT_NOTE);
+            if (!m || !next || m[5].trim()) {
+                notice('There has to be a note right after it in the same bar to join with.');
+                return;
+            }
+            const [a, b] = [parseLength(m[3]), parseLength(next[4])];
+            const total = formatLength([a[0] * b[1] + b[0] * a[1], a[1] * b[1]]);
+            const chords = /"/.test(m[1]) ? '' : (next[2].match(/"[^"]*"/g) || []).join('');
+            const text = m[1] + chords + m[2] + total + next[5];
+            commitNote(noteEdit.abc.slice(0, start) + text + noteEdit.abc.slice(end + next[0].length), { start, length: text.length });
+        }
+
+        function undoNote() {
+            if (!noteEdit || !noteEdit.history.length) return;
+            const last = noteEdit.history.pop();
+            noteEdit.abc = last.abc;
+            noteEdit.sel = last.sel;
+            const text = document.getElementById('noteEditText');
+            if (text) text.value = last.abc;
+            drawNoteEdit();
+        }
+
+        function toggleNoteText() {
+            noteEdit.text = !noteEdit.text;
+            renderTunePage();
+            drawAllMusic(document.getElementById('tunePage'));
+        }
+
+        let noteTextTimer = null;
+
+        function noteTextTyped() {
+            clearTimeout(noteTextTimer);
+            noteTextTimer = setTimeout(() => {
+                const value = document.getElementById('noteEditText').value;
+                if (value === noteEdit.abc) return;
+                noteEdit.history.push({ abc: noteEdit.abc, sel: noteEdit.sel });
+                noteEdit.abc = value;
+                noteEdit.sel = null;
+                drawNoteEdit();
+            }, 400);
+        }
+
+        function finishNoteEdit(keep) {
+            const editing = noteEdit;
+            noteEdit = null;
+            const tune = editing && tunes.find(t => t.id === editing.tuneId);
+            const link = tune && tune.links[editing.link];
+            if (keep && link && editing.abc.trim() && editing.abc !== link.abc) {
+                if (!link.edited) {
+                    link.original = link.abc;
+                    link.edited = true;
+                }
+                link.abc = editing.abc.trim() + '\n';
+                if (link.original === link.abc) {
+                    delete link.original;
+                    delete link.edited;
+                }
+                tune.updated = Date.now();
+                save();
+            }
+            if (!document.getElementById('tunePage').hidden) {
+                renderTunePage();
+                drawAllMusic(document.getElementById('tunePage'));
+            }
+        }
+
+        async function restoreOriginalNotes(tuneId, linkIndex) {
+            const tune = tunes.find(t => t.id === tuneId);
+            const link = tune && tune.links[linkIndex];
+            if (!link || !link.original) return;
+            if (!await ask('Put back the notes as they were before you changed them?', { ok: 'Put Them Back' })) return;
+            link.abc = link.original;
+            delete link.original;
+            delete link.edited;
+            tune.updated = Date.now();
+            save();
+            renderTunePage();
+            drawAllMusic(document.getElementById('tunePage'));
+        }
+
         // ---- Tune page ----
         // Tapping a tune opens its own page: everything about it, its dots (one tab per linked
         // setting), the drone in its key, and Edit.
@@ -2365,6 +2719,7 @@
         let pageSource = 0;
 
         function openTunePage(id) {
+            if (noteEdit && noteEdit.tuneId !== id) noteEdit = null;
             pageTuneId = id;
             const tune = tunes.find(t => t.id === id);
             const preferred = preferredSource(tune);
@@ -2400,9 +2755,10 @@
                 </div>
                 ${tune.author ? `<p><span class="label">Author:</span> ${escapeHTML(tune.author)}</p>` : ''}
                 ${tune.notes ? `<p class="page-notes">${escapeHTML(tune.notes).replace(/\n/g, '<br>')}</p>` : ''}
-                ${link || tune.links.some(l => l.tune) ? `<p class="page-links">${[
+                ${link || tune.links.some(l => l.tune || l.from) ? `<p class="page-links">${[
                     link ? `<a href="${escapeHTML(link)}" target="_blank" rel="noopener">Listen</a>` : '',
-                    ...tune.links.filter(l => l.tune).map((l, i, all) => `<a href="${sessionUrl(l)}" target="_blank" rel="noopener">The Session${all.length > 1 && l.number ? `, setting ${l.number}` : ''}</a>`)
+                    ...tune.links.filter(l => l.tune).map((l, i, all) => `<a href="${sessionUrl(l)}" target="_blank" rel="noopener">The Session${all.length > 1 && l.number ? `, setting ${l.number}` : ''}</a>`),
+                    ...tune.links.filter(l => !l.tune && safeLink(l.from || '')).map(l => `<a href="${escapeHTML(safeLink(l.from))}" target="_blank" rel="noopener">${escapeHTML(l.name || 'Source')}</a>`)
                 ].filter(Boolean).join(' · ')}</p>` : ''}
                 ${tune.links.some(l => l.auto) ? `<p class="match-check">Matched by name on The Session. Right&nbsp;tune?
                     <button class="small-btn" onclick="confirmMatch('${tune.id}')">Yes</button>
@@ -2422,10 +2778,14 @@
                     ${sources.length > 1 ? (source.key === preferred.key
                         ? '<p class="prefer-note">★ This is the one your sets use.</p>'
                         : `<p class="prefer-note"><button class="link-btn" onclick="preferSource('${tune.id}', '${source.key}')">★ Use this one in sets and open it first</button></p>`) : ''}
-                    ${source.kind === 'abc'
-                        ? `<div class="page-music" data-music="${tune.id}" data-link="${source.link}"></div>`
+                    ${source.kind === 'abc' && noteEdit && noteEdit.tuneId === tune.id && noteEdit.link === source.link
+                        ? noteEditHtml(tune)
+                        : source.kind === 'abc'
+                        ? `<div class="page-music" data-music="${tune.id}" data-link="${source.link}"></div>
+                            <p class="prefer-note note-change"><button class="link-btn" onclick="startNoteEdit('${tune.id}', ${source.link})">✎ Change notes</button>${tune.links[source.link].edited
+                                ? ` · You've changed some notes. <button class="link-btn" onclick="restoreOriginalNotes('${tune.id}', ${source.link})">put back the original</button>` : ''}</p>`
                         : `<img class="page-photo" data-photo="${source.id}" alt="Sheet music for ${escapeHTML(tune.name)}">`}`
-                : `<p class="empty">No dots yet. <button class="link-btn" onclick="findFromPage('${tune.id}')">Find it on The Session</button> or <button class="link-btn" onclick="editFromPage('${tune.id}')">add your own</button></p>`}
+                : `<p class="empty">No dots yet. <button class="link-btn" onclick="findFromPage('${tune.id}')">Find it on The Session</button>, <button class="link-btn" onclick="findFromPage('${tune.id}', true)">look elsewhere</button> or <button class="link-btn" onclick="editFromPage('${tune.id}')">add your own</button></p>`}
                 ${tune.key === null ? '' : `<div class="drone-row">
                     <a class="drone-pill" href="${droneLink(tune.key)}">${DRONE_ICON}<span>Drone in <b>${KEYS[tune.key]}</b></span></a>
                 </div>`}
@@ -2464,6 +2824,7 @@
         }
 
         function showPageSource(index) {
+            if (noteEdit && index !== pageSource) noteEdit = null;
             pageSource = index;
             renderTunePage();
             const page = document.getElementById('tunePage');
@@ -2473,6 +2834,7 @@
 
         // Back to the set if the page was opened from one (redrawn, in case the preferred setting changed)
         function closeTunePage() {
+            noteEdit = null;
             document.getElementById('tunePage').hidden = true;
             const setView = document.getElementById('setView');
             if (!setView.hidden && viewingSet) {
@@ -3243,20 +3605,24 @@
             searchSession(query);
         }
 
-        async function searchSession(query) {
+        async function searchSession(query, loose) {
             sessionQuery = query;
+            elsewhereQuery = '';
             document.getElementById('sessionResults').innerHTML = '';
             setSessionStatus('Looking on The Session…');
             try {
-                const response = await fetch(`${SESSION}/tunes/search?q=${encodeURIComponent(query)}&format=json&perpage=6`);
+                const response = await fetch(`${SESSION}/tunes/search?q=${encodeURIComponent(loose || query)}&format=json&perpage=6`);
                 const data = await response.json();
                 if (query !== sessionQuery) return;
                 const found = data.tunes || [];
                 if (!found.length) {
-                    setSessionStatus(`Nothing called that on The Session. <button class="link-btn" onclick="hideSession()">ok</button>`);
+                    // "The Kitchen Girl Reel" -> "kitchen girl", in case the extra words were in the way
+                    const simpler = simpleName(query);
+                    if (!loose && simpler && simpler !== query.toLowerCase()) return searchSession(query, simpler);
+                    setSessionStatus(`Nothing called that on The Session. <button class="link-btn" onclick="searchElsewhere(sessionQuery)">Look elsewhere</button> · <button class="link-btn" onclick="hideSession()">ok</button>`);
                     return;
                 }
-                setSessionStatus(`On The Session: <button class="link-btn" onclick="hideSession()">none of these</button>`);
+                setSessionStatus(`On The Session: <button class="link-btn" onclick="searchElsewhere(sessionQuery)">none of these, look elsewhere</button> · <button class="link-btn" onclick="hideSession()">close</button>`);
                 document.getElementById('sessionResults').innerHTML = found.map(t => `
                     <button class="session-row" onclick="openSessionTune(${Number(t.id)})">
                         ${escapeHTML(t.name)}
@@ -3326,7 +3692,7 @@
             const linked = document.getElementById('sessionLinked');
             linked.hidden = !editorLinks.length && !editorPhotos.length;
             linked.innerHTML = editorLinks.map((link, i) =>
-                `<p>✓ ${link.kind === 'abc' ? 'Pasted ABC' : `${escapeHTML(link.name || 'The Session')}${link.number ? `, setting&nbsp;${link.number}` : ''}`}${hasChords(link.abc) ? ' <span class="chip-key">with chords</span>' : ''} · <button class="link-btn" onclick="unlinkSession(${i})">remove</button></p>`
+                `<p>✓ ${link.kind === 'abc' ? (link.from ? `ABC from ${escapeHTML(link.name || 'elsewhere')}` : 'Pasted ABC') : `${escapeHTML(link.name || 'The Session')}${link.number ? `, setting&nbsp;${link.number}` : ''}`}${hasChords(link.abc) ? ' <span class="chip-key">with chords</span>' : ''} · <button class="link-btn" onclick="unlinkSession(${i})">remove</button></p>`
             ).join('') + editorPhotos.map((id, i) =>
                 `<p>✓ Photo ${i + 1} · <button class="link-btn" onclick="editorPhotos.splice(${i}, 1); renderSessionLinked()">remove</button></p>`
             ).join('')
@@ -3372,6 +3738,11 @@
         function abcTyped() {
             clearTimeout(pasteTimer);
             pasteTimer = setTimeout(() => {
+                const typed = document.getElementById('abcText').value.trim();
+                if (/^https?:\/\/\S+$/.test(typed)) {
+                    abcFromLink(typed);
+                    return;
+                }
                 const abc = normalizeAbc(document.getElementById('abcText').value);
                 const preview = document.getElementById('abcPreview');
                 if (!abc) {
@@ -3383,6 +3754,11 @@
         }
 
         function addPastedAbc() {
+            const typed = document.getElementById('abcText').value.trim();
+            if (/^https?:\/\/\S+$/.test(typed)) {
+                abcFromLink(typed);
+                return;
+            }
             const abc = normalizeAbc(document.getElementById('abcText').value);
             if (!abc) {
                 notice('Paste some ABC first.');
@@ -3393,6 +3769,290 @@
             document.getElementById('abcPreview').innerHTML = '';
             document.getElementById('abcPaste').hidden = true;
             renderSessionLinked();
+        }
+
+        // ---- Looking elsewhere ----
+        // When The Session doesn't have a tune, two other places can be searched from here:
+        // the Traditional Tune Archive (a wiki, whose API answers any web page), and the ABC
+        // tunebooks people keep on GitHub (its code search needs a token, so it uses the sync
+        // one). abcnotation.com and most other sites don't let a web app read their pages, so
+        // those open in a new tab, and what's copied there comes back with "Paste from clipboard".
+
+        const TTA = 'https://tunearch.org';
+        const TYPE_WORDS = /\b(reel|jig|hornpipe|polka|waltz|march|strathspey|slide|breakdown|rag|schottische|mazurka|barndance|set dance|slip jig)s?\b/g;
+        let elsewhereQuery = '';
+        let elsewhereFound = [];
+
+        // "The Kitchen Girl", "Kitchen Girl, The" and "Kitchen Girl (reel)" all come out "kitchen girl"
+        function simpleName(text) {
+            return String(text || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+                .replace(/\([^)]*\)/g, ' ').replace(/[’'`]/g, '').replace(/^(.*),\s*(the|an|a)\s*$/, '$1')
+                .replace(TYPE_WORDS, ' ').replace(/[^a-z0-9]+/g, ' ').trim().replace(/^(the|an|a) /, '');
+        }
+
+        // What to search for: "The Kitchen Girl Reel" -> "Kitchen Girl", since tunebooks often
+        // write "Kitchen Girl, The" and leave the type to the R: line
+        function searchName(name) {
+            const bare = String(name).replace(new RegExp(TYPE_WORDS.source, 'gi'), ' ').replace(/\([^)]*\)/g, ' ')
+                .replace(/^\s*the\s+/i, '').replace(/\s+/g, ' ').trim();
+            return bare || String(name).trim();
+        }
+
+        function sameTune(title, query) {
+            const t = simpleName(title);
+            const q = simpleName(query);
+            return Boolean(q) && (t === q || (t.startsWith(q + ' ') && t.split(' ').length - q.split(' ').length <= 1));
+        }
+
+        // Every tune in a piece of text: a wiki page, a tunebook file, a paste. A tune starts at
+        // X: (or a T: outside a tune) and runs to a blank line; it counts once it has a K: line.
+        function abcTunes(text) {
+            const clean = String(text || '').replace(/\r/g, '')
+                .replace(/<br\s*\/?>/gi, '\n').replace(/<\/?(abc|pre|nowiki|code|div|p|span|poem)\b[^>]*>/gi, '\n')
+                .replace(/&quot;/g, '"').replace(/&#0?39;|&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&');
+            const tunes = [];
+            let current = null;
+            const finish = () => {
+                if (current && current.some(l => /^K:/.test(l)) && current.some(l => l && !/^[A-Za-z]:|^%/.test(l))) tunes.push(current.join('\n'));
+                current = null;
+            };
+            clean.split('\n').forEach(raw => {
+                const line = raw.trim();
+                if (/^X:/.test(line) || (!current && /^T:/.test(line))) {
+                    finish();
+                    current = [line];
+                } else if (current) {
+                    if (!line || /^(\{\{|\}\}|==|\{\||\|\}|<)/.test(line)) finish();
+                    else current.push(line);
+                }
+            });
+            finish();
+            return tunes;
+        }
+
+        function abcTitles(abc) {
+            return (abc.match(/^T:.*$/gm) || []).map(l => l.slice(2).trim());
+        }
+
+        // The notes alone, to spot the same setting found in two places
+        function abcFingerprint(abc) {
+            return abc.split('\n').filter(l => !/^[A-Za-z]:|^%/.test(l)).join('').replace(/"[^"]*"|![^!]*!/g, '').replace(/[^A-Ga-gz]/g, '').slice(0, 48);
+        }
+
+        // "Ador" -> { key: 9, mode: 'dorian' }; K:G, K:Em, K:Amix, K:D major...
+        function abcKeyMode(abc) {
+            const match = String(abc || '').match(/^K:\s*([A-G])([#b♯♭]?)\s*([A-Za-z]*)/m);
+            if (!match) return null;
+            const key = pitchOf(match[1] + match[2]);
+            const word = match[3].toLowerCase().slice(0, 3);
+            const mode = { '': 'major', maj: 'major', ion: 'major', m: 'minor', min: 'minor', aeo: 'minor', dor: 'dorian', mix: 'mixolydian' }[word] || 'other';
+            return { key, mode };
+        }
+
+        // The first two bars, for a preview
+        function abcOpening(abc) {
+            const lines = abc.split('\n');
+            const header = lines.filter(l => /^[A-Za-z]:/.test(l) && !/^[TWwZSNHOABCDFGIP]:/.test(l));
+            const body = lines.filter(l => l.trim() && !/^[A-Za-z]:|^%/.test(l)).join(' ');
+            return header.join('\n') + '\n' + openingBars(body, 2) + '\n';
+        }
+
+        function githubToken() {
+            const config = syncConfig() || load(GAS_SYNC_KEY, null);
+            return config && config.token ? config.token : '';
+        }
+
+        // The Tune Archive's wiki API: a guess at the page's title first, then its search
+        async function searchTuneArchive(name) {
+            const api = async params => {
+                const response = await fetch(`${TTA}/w/api.php?${new URLSearchParams({ format: 'json', formatversion: '2', origin: '*', ...params })}`);
+                if (!response.ok) throw new Error('Tune Archive ' + response.status);
+                return response.json();
+            };
+            const titled = titleCase(searchName(name));
+            const search = await api({ action: 'query', list: 'search', srsearch: searchName(name), srnamespace: '*', srlimit: '8' }).catch(() => null);
+            const titles = [`Annotation:${titled}`, ...((search && search.query && search.query.search) || []).map(s => s.title)]
+                .filter((t, i, all) => all.indexOf(t) === i && sameTune(t.replace(/^\w+:/, ''), name)).slice(0, 5);
+            const pages = await api({ action: 'query', prop: 'revisions', rvprop: 'content', rvslots: 'main', redirects: '1', titles: titles.join('|') });
+            const found = [];
+            ((pages.query && pages.query.pages) || []).forEach(page => {
+                const revision = page.revisions && page.revisions[0];
+                const text = revision ? (revision.slots ? revision.slots.main.content : revision.content) : '';
+                abcTunes(text).forEach(abc => found.push({ abc, title: abcTitles(abc)[0] || page.title.replace(/^\w+:/, ''), where: 'Tune Archive', from: `${TTA}/wiki/${encodeURIComponent(page.title.replace(/ /g, '_'))}` }));
+            });
+            return found;
+        }
+
+        // GitHub's code search over .abc files, then each file read for the tunes with that title
+        async function searchGithubAbc(name, token) {
+            const headers = { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github.text-match+json' };
+            const query = `"${searchName(name).replace(/["\\]/g, '')}" extension:abc`;
+            const response = await fetch(`https://api.github.com/search/code?q=${encodeURIComponent(query)}&per_page=20`, { headers });
+            if (response.status === 401) throw new Error("GitHub didn't accept the sync token.");
+            if (response.status === 403 || response.status === 429) throw new Error('GitHub asks for a minute between searches. Try again shortly.');
+            if (!response.ok) throw new Error(`GitHub said ${response.status}.`);
+            // Each hit comes with the text around the match: keep files where it's a tune's title,
+            // and only one of the many copies of the same file
+            const seen = new Set();
+            const items = ((await response.json()).items || []).filter(item => {
+                const fragments = (item.text_matches || []).map(m => m.fragment || '');
+                const titled = fragments.some(f => abcTitles(f).some(t => sameTune(t, name)));
+                const print = fragments.join('').replace(/\s+/g, '').slice(0, 200);
+                if ((item.text_matches && !titled) || seen.has(item.sha) || (print && seen.has(print))) return false;
+                seen.add(item.sha);
+                if (print) seen.add(print);
+                return true;
+            }).slice(0, 8);
+            const files = await Promise.all(items.map(item =>
+                fetch(item.url, { headers: { Authorization: headers.Authorization, Accept: 'application/vnd.github.raw' } })
+                    .then(r => r.ok ? r.text() : '').catch(() => '').then(text => ({ item, text }))));
+            const found = [];
+            files.forEach(({ item, text }) => abcTunes(text).forEach(abc => {
+                const title = abcTitles(abc).find(t => sameTune(t, name));
+                if (title) found.push({ abc, title, where: 'GitHub', place: item.repository.full_name, from: item.html_url });
+            }));
+            return found;
+        }
+
+        function elsewhereLinks(name) {
+            const q = encodeURIComponent(name);
+            return `Or look yourself, copy the ABC, and come back to <b>Paste ABC</b>:
+                <a href="https://abcnotation.com/searchTunes?q=${q}&f=c&o=a&s=0" target="_blank" rel="noopener">abcnotation.com</a> ·
+                <a href="${TTA}/w/index.php?search=${q}" target="_blank" rel="noopener">Tune Archive</a> ·
+                <a href="https://www.google.com/search?q=${encodeURIComponent('"' + name + '" abc "K:"')}" target="_blank" rel="noopener">the web</a>`;
+        }
+
+        function lookElsewhere(name) {
+            const query = (name || document.getElementById('fName').value).trim();
+            if (!query) {
+                notice("Type the tune's name first.");
+                return;
+            }
+            searchElsewhere(query);
+        }
+
+        async function searchElsewhere(query) {
+            elsewhereQuery = query;
+            sessionQuery = '';
+            elsewhereFound = [];
+            document.getElementById('sessionResults').innerHTML = '';
+            const token = githubToken();
+            setSessionStatus(`Looking in the Tune Archive${token ? ' and the tunebooks on GitHub' : ''}…`);
+            const failed = [];
+            const searches = [
+                searchTuneArchive(query).catch(() => { failed.push('the Tune Archive'); return []; }),
+                token ? searchGithubAbc(query, token).catch(err => { failed.push(`GitHub (${err.message})`); return []; }) : Promise.resolve([])
+            ];
+            const results = (await Promise.all(searches)).flat();
+            if (query !== elsewhereQuery) return;
+            const seen = new Set();
+            elsewhereFound = results.filter(r => {
+                const print = abcFingerprint(r.abc);
+                if (!print || seen.has(print)) return false;
+                seen.add(print);
+                return true;
+            }).slice(0, 12);
+            const notes = [
+                failed.length ? `Couldn't search ${failed.join(' or ')}.` : '',
+                token ? '' : 'Turn on Sync (under Your Data) and it searches the ABC tunebooks people keep on GitHub too.'
+            ].filter(Boolean).map(n => `<br><span class="tune-meta">${escapeHTML(n)}</span>`).join('');
+            const back = `<button class="link-btn" onclick="hideSession()">ok</button>`;
+            setSessionStatus(elsewhereFound.length
+                ? `Found ${elsewhereFound.length} setting${elsewhereFound.length === 1 ? '' : 's'} called that. Pick one, or ${back}${notes}`
+                : `Nothing called that turned up. ${back}${notes}<br><span class="tune-meta">${elsewhereLinks(query)}</span>`);
+            document.getElementById('sessionResults').innerHTML = elsewhereFound.map((r, i) => {
+                const km = abcKeyMode(r.abc);
+                const meter = (r.abc.match(/^M:\s*(.+)$/m) || [])[1];
+                const rhythm = (r.abc.match(/^R:\s*(.+)$/m) || [])[1];
+                return `
+                    <button class="session-row" onclick="chooseElsewhere(${i})">
+                        ${escapeHTML(r.title)}
+                        <span class="tune-meta">${escapeHTML([r.place ? `${r.where}: ${r.place}` : r.where, rhythm, km ? KEYS[km.key] + (km.mode !== 'major' && km.mode !== 'other' ? ' ' + km.mode : '') : '', meter].filter(Boolean).join(' · '))}${hasChords(r.abc) ? ' · <b class="with-chords">with chords</b>' : ''}</span>
+                        <div class="session-preview" id="elsewhere-${i}"></div>
+                    </button>`;
+            }).join('') + (elsewhereFound.length ? `<p class="session-status tune-meta">${elsewhereLinks(query)}</p>` : '');
+            elsewhereFound.forEach((r, i) => drawAbc(document.getElementById(`elsewhere-${i}`), abcOpening(r.abc), true));
+        }
+
+        // Like picking a Session setting: the key, mode and type fill in from the tune's header
+        function chooseElsewhere(index) {
+            const r = elsewhereFound[index];
+            if (!r) return;
+            const abc = normalizeAbc(r.abc);
+            if (!editorLinks.length) {
+                const km = abcKeyMode(abc);
+                if (km) {
+                    document.getElementById('fKey').value = km.key;
+                    document.getElementById('fMode').value = km.mode;
+                }
+                const rhythm = ((r.abc.match(/^R:\s*(.+)$/m) || [])[1] || '').trim().toLowerCase();
+                if (TYPES.includes(rhythm)) document.getElementById('fType').value = rhythm;
+            }
+            editorLinks.push({ kind: 'abc', name: r.where, abc, from: r.from });
+            hideSession();
+            renderSessionLinked();
+        }
+
+        // Paste from clipboard, for coming back from another site with its ABC copied
+        async function pasteClipboard() {
+            try {
+                const text = await navigator.clipboard.readText();
+                if (!text.trim()) {
+                    notice('Nothing on the clipboard yet. Copy the ABC first.');
+                    return;
+                }
+                document.getElementById('abcText').value = text;
+                abcTyped();
+            } catch (e) {
+                notice("This browser won't hand over the clipboard. Tap in the box and paste instead.");
+            }
+        }
+
+        // A link pasted instead of ABC: The Session, the Tune Archive and GitHub can be read from here
+        async function abcFromLink(url) {
+            const preview = document.getElementById('abcPreview');
+            const say = text => { preview.innerHTML = `<p class="session-status">${text}</p>`; };
+            const name = document.getElementById('fName').value.trim();
+            const pick = tunes => tunes.find(abc => abcTitles(abc).some(t => sameTune(t, name))) || tunes[0];
+            try {
+                let match;
+                if ((match = url.match(/thesession\.org\/tunes\/(\d+)(?:#setting(\d+))?/))) {
+                    say('Reading it from The Session…');
+                    sessionTune = await (await fetch(`${SESSION}/tunes/${match[1]}?format=json`)).json();
+                    const index = Math.max(0, sessionTune.settings.findIndex(s => String(s.id) === match[2]));
+                    document.getElementById('abcText').value = '';
+                    preview.innerHTML = '';
+                    document.getElementById('abcPaste').hidden = true;
+                    chooseSetting(index);
+                    return;
+                }
+                let text = '';
+                if ((match = url.match(/tunearch\.org\/wiki\/([^?#]+)/))) {
+                    say('Reading it from the Tune Archive…');
+                    const data = await (await fetch(`${TTA}/w/api.php?${new URLSearchParams({ action: 'query', prop: 'revisions', rvprop: 'content', rvslots: 'main', redirects: '1', format: 'json', formatversion: '2', origin: '*', titles: decodeURIComponent(match[1]).replace(/_/g, ' ') })}`)).json();
+                    const page = data.query.pages[0];
+                    text = page.revisions ? page.revisions[0].slots.main.content : '';
+                } else if ((match = url.match(/^https:\/\/(?:raw\.githubusercontent\.com\/|github\.com\/([^/]+)\/([^/]+)\/(?:blob|raw)\/)(.+)$/))) {
+                    say('Reading it from GitHub…');
+                    const raw = match[1] ? `https://raw.githubusercontent.com/${match[1]}/${match[2]}/${match[3]}` : url;
+                    text = await (await fetch(raw)).text();
+                } else if (/abcnotation\.com/.test(url)) {
+                    say("abcnotation.com doesn't let other apps read its pages. On the tune's page there, copy the ABC text (it starts with X:) and paste that here.");
+                    return;
+                } else {
+                    say("That site doesn't let other apps read its pages. Copy the ABC itself (it starts with X:) and paste that here.");
+                    return;
+                }
+                const found = abcTunes(text);
+                if (!found.length) {
+                    say('No ABC on that page.');
+                    return;
+                }
+                document.getElementById('abcText').value = pick(found);
+                abcTyped();
+            } catch (e) {
+                say("Couldn't read that link. Copy the ABC itself (it starts with X:) and paste that here.");
+            }
         }
 
         // ---- Sheet music photos ----
@@ -4185,9 +4845,11 @@
         }
 
         // Opens the editor already searching The Session for this tune's name
-        function findFromPage(tuneId) {
+        function findFromPage(tuneId, elsewhere) {
             editFromPage(tuneId);
-            searchSession(tunes.find(t => t.id === tuneId).name);
+            const name = tunes.find(t => t.id === tuneId).name;
+            if (elsewhere) searchElsewhere(name);
+            else searchSession(name);
             document.getElementById('sessionBox').scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
 
@@ -4461,6 +5123,14 @@
             updateBackupStatus();
         }
 
+        // Where found ABC came from, and the dots as they were before you changed any notes
+        function linkExtras(l) {
+            return {
+                ...(safeLink(String(l.from || '')) ? { from: String(l.from).slice(0, 400) } : {}),
+                ...(l.edited === true && typeof l.original === 'string' ? { edited: true, original: l.original.slice(0, 12000) } : {})
+            };
+        }
+
         function cleanTunes(data) {
             const raw = data && Array.isArray(data.tunes) ? data.tunes : null;
             if (!raw) return null;
@@ -4487,8 +5157,8 @@
                     added: isDate(t.added) ? t.added : todayString(),
                     // Session settings carry their ids; pasted ABC is { kind: 'abc', abc }
                     links: t.links.filter(l => l && ((isInt(l.tune) && isInt(l.setting)) || (l.kind === 'abc' && l.abc))).slice(0, 8).map(l => l.kind === 'abc'
-                        ? { kind: 'abc', name: String(l.name || 'ABC').slice(0, 40), abc: String(l.abc).slice(0, 12000) }
-                        : { tune: l.tune, setting: l.setting, number: Number(l.number) || null, name: String(l.name || '').slice(0, 80), abc: String(l.abc || '').slice(0, 8000), ...(l.auto === true ? { auto: true } : {}) }),
+                        ? { kind: 'abc', name: String(l.name || 'ABC').slice(0, 40), abc: String(l.abc).slice(0, 12000), ...linkExtras(l) }
+                        : { tune: l.tune, setting: l.setting, number: Number(l.number) || null, name: String(l.name || '').slice(0, 80), abc: String(l.abc || '').slice(0, 8000), ...(l.auto === true ? { auto: true } : {}), ...linkExtras(l) }),
                     photos: (Array.isArray(t.photos) ? t.photos : []).filter(id => typeof id === 'string' && /^[\w-]{1,48}$/.test(id)).slice(0, 12)
                 };
             });
