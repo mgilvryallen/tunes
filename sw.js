@@ -1,6 +1,9 @@
 // Offline support: the page from the network when it can, everything else from cache.
 // Bump CACHE when files are added or removed.
-const CACHE = 'tunes-v16';
+const CACHE = 'tunes-v17';
+// Kept across versions (its name doesn't start with "tune", so activate leaves it alone)
+const SOUNDS = 'soundfont-fiddle';
+const SOUNDS_FROM = 'https://paulrosen.github.io/midi-js-soundfonts/';
 const FILES = [
     './',
     'index.html',
@@ -30,6 +33,17 @@ self.addEventListener('activate', event => {
 });
 
 self.addEventListener('fetch', event => {
+    // The player's fiddle sounds: each note kept once it's been fetched, so tunes play offline
+    if (event.request.method === 'GET' && event.request.url.startsWith(SOUNDS_FROM)) {
+        event.respondWith(
+            caches.open(SOUNDS).then(cache => cache.match(event.request).then(cached => cached || fetch(event.request).then(response => {
+                if (response.ok) cache.put(event.request, response.clone());
+                return response;
+            })))
+        );
+        return;
+    }
+
     if (event.request.method !== 'GET' || !event.request.url.startsWith(self.location.origin)) return;
 
     // The page itself comes from the network first, so a new version shows on the next open

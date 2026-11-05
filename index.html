@@ -943,6 +943,43 @@
             font-weight: normal;
         }
 
+        .player {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px 12px;
+            margin: 0 0 8px;
+        }
+
+        .player .chip {
+            margin: 0;
+        }
+
+        .play-btn {
+            min-width: 84px;
+            min-height: 38px;
+        }
+
+        .tempo {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            color: var(--muted);
+            flex: 1 1 90px;
+        }
+
+        .tempo input {
+            flex: 1;
+            min-width: 80px;
+            accent-color: var(--woad);
+        }
+
+        .page-music .playing {
+            fill: var(--rust);
+            stroke: var(--rust);
+        }
+
         .note-change {
             margin-top: 6px;
         }
@@ -2337,10 +2374,13 @@
                 .reduce((all, l) => all + (all && !/\|\s*$/.test(all) ? ' ' : '') + l, '');
             const perLine = barsPerLine(element.clientWidth || 330);
             ensureAbcjs().then(() => {
-                window.ABCJS.renderAbc(element, header.join('\n') + '\n' + reflow(body, perLine) + '\n', {
-                    responsive: 'resize', staffwidth: 40 + 165 * perLine,
+                // The drawing is kept with its box, for the player to play and light up note by note
+                element.visualObj = window.ABCJS.renderAbc(element, header.join('\n') + '\n' + reflow(body, perLine) + '\n', {
+                    responsive: 'resize', staffwidth: 40 + 165 * perLine, add_classes: true,
                     paddingleft: 0, paddingright: 0, foregroundColor: '#2c2416', visualTranspose: shift || 0
-                });
+                })[0];
+                // (redrawn while playing, say transposed: the old drawing's timing no longer fits)
+                if (player && element.closest('#tunePage')) stopPlayer();
             }).catch(() => { element.textContent = "Couldn't draw the notation."; });
         }
 
@@ -2502,6 +2542,7 @@
         }
 
         function startNoteEdit(tuneId, linkIndex) {
+            stopPlayer();
             const tune = tunes.find(t => t.id === tuneId);
             const link = tune && tune.links[linkIndex];
             if (!link || !link.abc) return;
@@ -2711,6 +2752,149 @@
             drawAllMusic(document.getElementById('tunePage'));
         }
 
+        // ---- Playing the dots ----
+        // abcjs turns the drawn tune into sound (a fiddle, with the chord symbols as a quiet guitar
+        // backing) and says when each note sounds, so the note playing lights up. The sounds
+        // come note by note from abcjs's sound library online; the service worker keeps each one,
+        // so a tune played once plays offline too. Speed is in the tune's beats (a jig's dotted
+        // quarter, a reel's quarter), slower than session speed to start, and remembered per tune.
+
+        const SOUNDFONT = 'https://paulrosen.github.io/midi-js-soundfonts/FluidR3_GM/';
+        const TEMPO_KEY = 'tunesTempo';
+        const LEARNING_TEMPO = { reel: 160, breakdown: 160, hornpipe: 140, strathspey: 110, march: 110, barndance: 150, schottische: 140, rag: 150, jig: 90, 'slip jig': 90, slide: 110, polka: 160, waltz: 120, mazurka: 120, 'three-two': 160 };
+        const playerPrefs = load(TEMPO_KEY, {});
+        let player = null;  // { element, synth, timer, tuneId, lit }
+        let playLoop = false;
+        let playChords = true;
+
+        function tempoOf(tune) {
+            return playerPrefs[tune.id] || LEARNING_TEMPO[tune.type] || 120;
+        }
+
+        function playerHtml(tune) {
+            const playing = player && player.tuneId === tune.id;
+            const chords = tune.links.some(l => hasChords(l.abc));
+            return `
+                <div class="player">
+                    <button class="small-btn play-btn" id="playBtn" onclick="togglePlay('${tune.id}')" aria-label="${playing ? 'Stop' : 'Play the dots'}">${playing ? '■ Stop' : '▶ Play'}</button>
+                    <label class="tempo">
+                        <input type="range" min="40" max="240" step="2" value="${tempoOf(tune)}" oninput="tempoChanged('${tune.id}', this.value)" aria-label="Speed in beats a minute">
+                        <span id="tempoLabel">${tempoOf(tune)}</span>&nbsp;bpm
+                    </label>
+                    <button class="chip style-chip${playLoop ? ' selected' : ''}" style="--accent: var(--woad)" onclick="playLoop = !playLoop; this.classList.toggle('selected', playLoop)" aria-pressed="${playLoop}">Loop</button>
+                    ${chords ? `<button class="chip style-chip${playChords ? ' selected' : ''}" style="--accent: var(--woad)" onclick="toggleBacking('${tune.id}', this)" aria-pressed="${playChords}">Chords</button>` : ''}
+                </div>`;
+        }
+
+        let tempoTimer = null;
+
+        function tempoChanged(tuneId, value) {
+            document.getElementById('tempoLabel').textContent = value;
+            playerPrefs[tuneId] = Number(value);
+            localStorage.setItem(TEMPO_KEY, JSON.stringify(playerPrefs));
+            // A new speed while playing starts it again at that speed, once the slider settles
+            clearTimeout(tempoTimer);
+            if (player && player.tuneId === tuneId) tempoTimer = setTimeout(() => restartPlayer(tuneId), 350);
+        }
+
+        function toggleBacking(tuneId, button) {
+            playChords = !playChords;
+            button.classList.toggle('selected', playChords);
+            if (player && player.tuneId === tuneId) restartPlayer(tuneId);
+        }
+
+        function restartPlayer(tuneId) {
+            stopPlayer();
+            togglePlay(tuneId);
+        }
+
+        function togglePlay(tuneId) {
+            if (player) {
+                const same = player.tuneId === tuneId;
+                stopPlayer();
+                if (same) return;
+            }
+            // Phones only allow sound that starts from a tap, so the audio starts here, before any waiting
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            if (!AudioContext) {
+                notice("This browser can't play sound.");
+                return;
+            }
+            const audioContext = new AudioContext();
+            audioContext.resume();
+            const tune = tunes.find(t => t.id === tuneId);
+            const element = document.querySelector('#tunePage .page-music[data-music]');
+            const visual = element && element.visualObj;
+            if (!tune || !visual) {
+                audioContext.close();
+                return;
+            }
+            const bpm = tempoOf(tune);
+            const synth = new window.ABCJS.synth.CreateSynth();
+            const me = { element, synth, tuneId, audioContext, lit: [], timer: null };
+            player = me;
+            setPlayButton(true, 'Loading…');
+            synth.init({
+                audioContext, visualObj: visual,
+                millisecondsPerMeasure: visual.millisecondsPerMeasure(bpm),
+                options: { soundFontUrl: SOUNDFONT, program: 40, chordsOff: !playChords, chordprog: 24, bassprog: 24, chordvol: 40, bassvol: 45 }
+            }).then(() => synth.prime()).then(() => {
+                if (player !== me) return;
+                me.timer = new window.ABCJS.TimingCallbacks(visual, { qpm: bpm, eventCallback: event => lightNotes(me, event) });
+                synth.start();
+                me.timer.start();
+                setPlayButton(true);
+            }).catch(() => {
+                if (player === me) stopPlayer();
+                notice("Couldn't get the fiddle sounds. The first play of a tune needs the internet.");
+            });
+        }
+
+        function lightNotes(me, event) {
+            me.lit.forEach(el => el.classList.remove('playing'));
+            me.lit = [];
+            if (player !== me) return;
+            if (!event) {
+                // The end: round again, or stop
+                if (playLoop) {
+                    me.synth.stop();
+                    me.timer.stop();
+                    me.timer.reset();
+                    me.synth.start();
+                    me.timer.start();
+                } else {
+                    stopPlayer();
+                }
+                return 'continue';
+            }
+            me.lit = (event.elements || []).flat();
+            me.lit.forEach(el => el.classList.add('playing'));
+            // Keep the playing line in view
+            const first = me.lit[0];
+            if (first && first.getBoundingClientRect) {
+                const box = first.getBoundingClientRect();
+                if (box.bottom > window.innerHeight - 20 || box.top < 20) first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        }
+
+        function stopPlayer() {
+            const me = player;
+            player = null;
+            if (!me) return;
+            try { me.synth.stop(); } catch (e) {}
+            if (me.timer) me.timer.stop();
+            me.lit.forEach(el => el.classList.remove('playing'));
+            me.audioContext.close().catch(() => {});
+            setPlayButton(false);
+        }
+
+        function setPlayButton(playing, text) {
+            const button = document.getElementById('playBtn');
+            if (!button) return;
+            button.textContent = text || (playing ? '■ Stop' : '▶ Play');
+            button.setAttribute('aria-label', playing ? 'Stop' : 'Play the dots');
+        }
+
         // ---- Tune page ----
         // Tapping a tune opens its own page: everything about it, its dots (one tab per linked
         // setting), the drone in its key, and Edit.
@@ -2781,7 +2965,7 @@
                     ${source.kind === 'abc' && noteEdit && noteEdit.tuneId === tune.id && noteEdit.link === source.link
                         ? noteEditHtml(tune)
                         : source.kind === 'abc'
-                        ? `<div class="page-music" data-music="${tune.id}" data-link="${source.link}"></div>
+                        ? `${playerHtml(tune)}<div class="page-music" data-music="${tune.id}" data-link="${source.link}"></div>
                             <p class="prefer-note note-change"><button class="link-btn" onclick="startNoteEdit('${tune.id}', ${source.link})">✎ Change notes</button>${tune.links[source.link].edited
                                 ? ` · You've changed some notes. <button class="link-btn" onclick="restoreOriginalNotes('${tune.id}', ${source.link})">put back the original</button>` : ''}</p>`
                         : `<img class="page-photo" data-photo="${source.id}" alt="Sheet music for ${escapeHTML(tune.name)}">`}`
@@ -2835,6 +3019,7 @@
         // Back to the set if the page was opened from one (redrawn, in case the preferred setting changed)
         function closeTunePage() {
             noteEdit = null;
+            stopPlayer();
             document.getElementById('tunePage').hidden = true;
             const setView = document.getElementById('setView');
             if (!setView.hidden && viewingSet) {
