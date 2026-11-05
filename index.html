@@ -955,6 +955,12 @@
             margin: 0;
         }
 
+        .play-sound {
+            width: auto;
+            padding: 6px 8px;
+            font-size: 14px;
+        }
+
         .play-btn {
             min-width: 84px;
             min-height: 38px;
@@ -2375,7 +2381,8 @@
             const perLine = barsPerLine(element.clientWidth || 330);
             ensureAbcjs().then(() => {
                 // The drawing is kept with its box, for the player to play and light up note by note
-                element.visualObj = window.ABCJS.renderAbc(element, header.join('\n') + '\n' + reflow(body, perLine) + '\n', {
+                element.drawnAbc = header.join('\n') + '\n' + reflow(body, perLine) + '\n';
+                element.visualObj = window.ABCJS.renderAbc(element, element.drawnAbc, {
                     responsive: 'resize', staffwidth: 40 + 165 * perLine, add_classes: true,
                     paddingleft: 0, paddingright: 0, foregroundColor: '#2c2416', visualTranspose: shift || 0
                 })[0];
@@ -2753,8 +2760,10 @@
         }
 
         // ---- Playing the dots ----
-        // abcjs turns the drawn tune into sound (a fiddle, with the chord symbols as a quiet guitar
-        // backing) and says when each note sounds, so the note playing lights up. The sounds
+        // abcjs turns the drawn tune into sound (a fiddle, piano or banjo, with a piano playing the
+        // chords: the dots' own chord symbols, or your chart's when the dots have none) and says
+        // when each note sounds, so the note playing lights up. Melody notes are cut short of their
+        // full length, so the rhythm comes through instead of one note smearing into the next. The sounds
         // come note by note from abcjs's sound library online; the service worker keeps each one,
         // so a tune played once plays offline too. Speed is in the tune's beats (a jig's dotted
         // quarter, a reel's quarter), slower than session speed to start, and remembered per tune.
@@ -2762,7 +2771,11 @@
         const SOUNDFONT = 'https://paulrosen.github.io/midi-js-soundfonts/FluidR3_GM/';
         const TEMPO_KEY = 'tunesTempo';
         const LEARNING_TEMPO = { reel: 160, breakdown: 160, hornpipe: 140, strathspey: 110, march: 110, barndance: 150, schottische: 140, rag: 150, jig: 90, 'slip jig': 90, slide: 110, polka: 160, waltz: 120, mazurka: 120, 'three-two': 160 };
+        const SOUND_KEY = 'tunesSound';
+        // program: General MIDI instrument; length: how much of each note sounds (the rest is a gap)
+        const SOUNDS = { fiddle: { label: 'Fiddle', program: 40, length: 0.62 }, piano: { label: 'Piano', program: 0, length: 0.85 }, banjo: { label: 'Banjo', program: 105, length: 0.9 } };
         const playerPrefs = load(TEMPO_KEY, {});
+        let playSound = SOUNDS[load(SOUND_KEY, 'fiddle')] ? load(SOUND_KEY, 'fiddle') : 'fiddle';
         let player = null;  // { element, synth, timer, tuneId, lit }
         let playLoop = false;
         let playChords = true;
@@ -2773,7 +2786,8 @@
 
         function playerHtml(tune) {
             const playing = player && player.tuneId === tune.id;
-            const chords = tune.links.some(l => hasChords(l.abc));
+            const chart = chartFor(tune);
+            const chords = Boolean(chart && chart.parts.length);
             return `
                 <div class="player">
                     <button class="small-btn play-btn" id="playBtn" onclick="togglePlay('${tune.id}')" aria-label="${playing ? 'Stop' : 'Play the dots'}">${playing ? '■ Stop' : '▶ Play'}</button>
@@ -2781,7 +2795,8 @@
                         <input type="range" min="40" max="240" step="2" value="${tempoOf(tune)}" oninput="tempoChanged('${tune.id}', this.value)" aria-label="Speed in beats a minute">
                         <span id="tempoLabel">${tempoOf(tune)}</span>&nbsp;bpm
                     </label>
-                    <button class="chip style-chip${playLoop ? ' selected' : ''}" style="--accent: var(--woad)" onclick="playLoop = !playLoop; this.classList.toggle('selected', playLoop)" aria-pressed="${playLoop}">Loop</button>
+                    <select class="play-sound" onchange="soundChosen('${tune.id}', this.value)" aria-label="Sound">${Object.entries(SOUNDS).map(([id, sound]) => `<option value="${id}"${id === playSound ? ' selected' : ''}>${sound.label}</option>`).join('')}</select>
+                    <button class="chip style-chip${playLoop ? ' selected' : ''}" style="--accent: var(--woad)" onclick="playLoop = !playLoop; this.classList.toggle('selected', playLoop)" aria-pressed="${playLoop}" title="Play it over and over until you tap Stop">↻ Repeat</button>
                     ${chords ? `<button class="chip style-chip${playChords ? ' selected' : ''}" style="--accent: var(--woad)" onclick="toggleBacking('${tune.id}', this)" aria-pressed="${playChords}">Chords</button>` : ''}
                 </div>`;
         }
@@ -2795,6 +2810,78 @@
             // A new speed while playing starts it again at that speed, once the slider settles
             clearTimeout(tempoTimer);
             if (player && player.tuneId === tuneId) tempoTimer = setTimeout(() => restartPlayer(tuneId), 350);
+        }
+
+        function soundChosen(tuneId, id) {
+            playSound = SOUNDS[id] ? id : 'fiddle';
+            localStorage.setItem(SOUND_KEY, JSON.stringify(playSound));
+            if (player && player.tuneId === tuneId) restartPlayer(tuneId);
+        }
+
+        // The chart's chords written into the dots' bars, one per beat where they change, for
+        // dots that have no chord symbols of their own. Bars are matched in order, the way the
+        // chart is read from dots: full bars only (pickups skipped), endings where they fall.
+        function withChartChords(abc, parts) {
+            if (hasChords(abc) || !parts || !parts.length) return abc;
+            const chart = parts.flatMap(p => [...p.bars, ...(p.first || []), ...(p.second || [])]);
+            const lines = abc.split('\n');
+            const header = lines.filter(l => /^[A-Za-z]:/.test(l));
+            const body = lines.filter(l => l.trim() && !/^[A-Za-z]:/.test(l)).join('\n');
+            const pieces = body.split(/(\[\||\|\]|::|:*\|+:*)/);
+            const lengths = pieces.filter((_, i) => i % 2 === 0).map(lengthIn).filter(n => n > 0).sort((a, b) => a - b);
+            const usual = lengths[Math.floor(lengths.length / 2)] || 0;
+            let n = 0;
+            for (let i = 0; i < pieces.length && n < chart.length; i += 2) {
+                const content = pieces[i];
+                const total = lengthIn(content);
+                if (!(total > 0 && total >= usual / 2)) continue;
+                const tokens = String(chart[n++] || '').trim().split(/\s+/).filter(Boolean);
+                const marks = tokens.map((t, j) => [j * total / tokens.length, t]).filter(([, t]) => CHORD.test(t));
+                // Where each note starts, in note lengths from the start of the bar
+                const notes = [];
+                let at = 0;
+                for (const m of content.matchAll(/"[^"]*"|![^!]*!|\[[A-Za-z]:[^\]]*\]|([\^_=]*[A-Ga-gz][,']*)(\d*)(\/*)(\d*)/g)) {
+                    if (!m[1]) continue;
+                    notes.push({ index: m.index, at });
+                    at += (m[2] ? Number(m[2]) : 1) / (m[4] ? Number(m[4]) : Math.pow(2, m[3].length));
+                }
+                let text = content;
+                marks.reverse().forEach(([target, chord]) => {
+                    const note = notes.find(x => x.at >= target - 1e-6);
+                    if (note) text = text.slice(0, note.index) + `"${chord}"` + text.slice(note.index);
+                });
+                pieces[i] = text;
+            }
+            return header.join('\n') + '\n' + pieces.join('') + '\n';
+        }
+
+        // The tune as it should sound: the drawn dots, plus the chart's chords if they have none.
+        // Drawn off-screen, since the synth plays a drawing; the timing comes from the real one.
+        function audioVisual(tune, element) {
+            const chart = playChords ? chartFor(tune) : null;
+            if (!chart || !element.drawnAbc || hasChords(element.drawnAbc)) return element.visualObj;
+            // The chart is in the key the dots sound in; the dots are drawn moved from where they're written
+            const parts = JSON.parse(JSON.stringify(chart.parts));
+            if (tune.dotsShift && chart.from === 'your chart') transposeParts(parts, -tune.dotsShift, abcKeyOf(element.drawnAbc), tune.mode);
+            const abc = withChartChords(element.drawnAbc, parts);
+            if (abc === element.drawnAbc) return element.visualObj;
+            let hidden = document.getElementById('audioDots');
+            if (!hidden) {
+                hidden = document.createElement('div');
+                hidden.id = 'audioDots';
+                hidden.setAttribute('aria-hidden', 'true');
+                hidden.style.cssText = 'position: fixed; left: -10000px; top: 0; width: 600px; visibility: hidden;';
+                document.body.appendChild(hidden);
+            }
+            return window.ABCJS.renderAbc(hidden, abc, { visualTranspose: tune.dotsShift || 0 })[0] || element.visualObj;
+        }
+
+        // Each melody note sounds for part of its length, then a short gap: the bow lifting
+        function articulate(tracks, length) {
+            (tracks[0] || []).forEach(note => {
+                const span = note.end - note.start;
+                if (span > 0) note.end = note.start + Math.max(span * length, span - 1 / 16);
+            });
         }
 
         function toggleBacking(tuneId, button) {
@@ -2834,10 +2921,15 @@
             const me = { element, synth, tuneId, audioContext, lit: [], timer: null };
             player = me;
             setPlayButton(true, 'Loading…');
+            const sound = SOUNDS[playSound] || SOUNDS.fiddle;
             synth.init({
-                audioContext, visualObj: visual,
+                audioContext, visualObj: audioVisual(tune, element),
                 millisecondsPerMeasure: visual.millisecondsPerMeasure(bpm),
-                options: { soundFontUrl: SOUNDFONT, program: 40, chordsOff: !playChords, chordprog: 24, bassprog: 24, chordvol: 40, bassvol: 45 }
+                options: {
+                    soundFontUrl: SOUNDFONT, program: sound.program, chordsOff: !playChords,
+                    chordprog: 0, bassprog: 0, chordvol: 64, bassvol: 72, fadeLength: 60,
+                    sequenceCallback: tracks => articulate(tracks, sound.length)
+                }
             }).then(() => synth.prime()).then(() => {
                 if (player !== me) return;
                 me.timer = new window.ABCJS.TimingCallbacks(visual, { qpm: bpm, eventCallback: event => lightNotes(me, event) });
@@ -2846,7 +2938,7 @@
                 setPlayButton(true);
             }).catch(() => {
                 if (player === me) stopPlayer();
-                notice("Couldn't get the fiddle sounds. The first play of a tune needs the internet.");
+                notice("Couldn't get the sounds. The first play with each sound needs the internet.");
             });
         }
 
@@ -4072,7 +4164,12 @@
         async function searchGithubAbc(name, token) {
             const headers = { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github.text-match+json' };
             const query = `"${searchName(name).replace(/["\\]/g, '')}" extension:abc`;
-            const response = await fetch(`https://api.github.com/search/code?q=${encodeURIComponent(query)}&per_page=20`, { headers });
+            const url = `https://api.github.com/search/code?q=${encodeURIComponent(query)}&per_page=20`;
+            // Safari's "Load failed" means no answer reached the page; one more try, with plainer
+            // headers, before giving up
+            const response = await fetch(url, { headers }).catch(() => new Promise(resolve => setTimeout(resolve, 1500))
+                .then(() => fetch(url, { headers: { Authorization: headers.Authorization } })))
+                .catch(() => { throw new Error("it didn't answer. Try again in a minute"); });
             if (response.status === 401) throw new Error("GitHub didn't accept the sync token.");
             if (response.status === 403 || response.status === 429) throw new Error('GitHub asks for a minute between searches. Try again shortly.');
             if (!response.ok) throw new Error(`GitHub said ${response.status}.`);
