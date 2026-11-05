@@ -721,6 +721,7 @@
 
         .music-tools {
             display: flex;
+            flex-wrap: wrap;
             justify-content: space-between;
             align-items: center;
             gap: 10px;
@@ -728,6 +729,7 @@
         }
 
         .music-tools .style-chips {
+            width: 100%;
             margin: 0;
         }
 
@@ -943,61 +945,54 @@
             font-weight: normal;
         }
 
+        /* One row: play, speed, then melody and chords with small upright volume sliders */
         .player {
             display: flex;
             flex-wrap: wrap;
             align-items: center;
-            gap: 8px 12px;
-            margin: 0 0 8px;
+            gap: 8px 16px;
+            margin: 0;
         }
 
         .player .chip {
             margin: 0;
         }
 
-        .player-main,
-        .player-layer {
-            display: flex;
+        .player-group {
+            display: inline-flex;
             align-items: center;
-            gap: 10px;
-            width: 100%;
+            gap: 6px;
         }
 
-        .player-layer .chip {
-            min-width: 76px;
-        }
-
-        .layer-volume {
-            flex: 1;
-            min-width: 60px;
+        .vslider {
+            writing-mode: vertical-lr;
+            direction: rtl;
+            width: 18px;
+            height: 38px;
+            margin: 0;
+            padding: 0;
             accent-color: var(--woad);
+            cursor: pointer;
         }
 
         .play-sound {
             width: auto;
             flex: 0 0 auto;
-            padding: 6px 30px 6px 8px;
+            padding: 5px 28px 5px 8px;
             font-size: 14px;
         }
 
         .play-btn {
-            min-width: 84px;
-            min-height: 38px;
+            min-width: 76px;
+            min-height: 36px;
         }
 
-        .tempo {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 14px;
+        .tempo-label {
+            font-size: 13px;
+            line-height: 1.1;
             color: var(--muted);
-            flex: 1 1 90px;
-        }
-
-        .tempo input {
-            flex: 1;
-            min-width: 80px;
-            accent-color: var(--woad);
+            text-align: center;
+            min-width: 30px;
         }
 
         .page-music .playing {
@@ -2797,11 +2792,9 @@
         // program: General MIDI instrument; hold: how much of an eighth note sounds at full
         // volume before fading out (longer notes hold longer, and fade over the same time)
         const SOUNDS = { fiddle: { label: 'Fiddle', program: 40, hold: 0.6 }, piano: { label: 'Piano', program: 0, hold: 0.8 }, banjo: { label: 'Banjo', program: 105, hold: 0.85 } };
-        const CHORD_SOUNDS = { piano: { label: 'Piano', program: 0 }, guitar: { label: 'Guitar', program: 25 } };
         const playerPrefs = load(TEMPO_KEY, {});
-        const playSettings = { melodySound: load('tunesSound', 'fiddle'), chordSound: 'piano', melodyVolume: 80, chordVolume: 60, ...load(PLAYER_KEY, {}) };
+        const playSettings = { melodySound: load('tunesSound', 'fiddle'), melodyVolume: 80, chordVolume: 60, ...load(PLAYER_KEY, {}) };
         if (!SOUNDS[playSettings.melodySound]) playSettings.melodySound = 'fiddle';
-        if (!CHORD_SOUNDS[playSettings.chordSound]) playSettings.chordSound = 'piano';
         const layerOn = { melody: true, chords: false };
         let player = null;  // { tuneId, element, visual, audioContext, gains, layers, startAt, timer, lit }
 
@@ -2816,23 +2809,21 @@
         function playerHtml(tune) {
             const playing = player && player.tuneId === tune.id;
             const chart = chartFor(tune);
-            const layer = (kind, label, sounds, soundKey, volumeKey) => `
-                <div class="player-layer">
+            const layer = (kind, label, volumeKey, sounds) => `
+                <span class="player-group">
                     <button class="chip style-chip${layerOn[kind] ? ' selected' : ''}" id="layer-${kind}" style="--accent: var(--woad)" onclick="toggleLayer('${kind}')" aria-pressed="${layerOn[kind]}">${label}</button>
-                    <select class="play-sound" onchange="layerSound('${kind}', this.value)" aria-label="${label} sound">${Object.entries(sounds).map(([id, sound]) => `<option value="${id}"${id === playSettings[soundKey] ? ' selected' : ''}>${sound.label}</option>`).join('')}</select>
-                    <input class="layer-volume" type="range" min="0" max="100" value="${playSettings[volumeKey]}" oninput="layerVolume('${kind}', this.value)" aria-label="${label} volume">
-                </div>`;
+                    ${sounds ? `<select class="play-sound" onchange="layerSound(this.value)" aria-label="${label} sound">${Object.entries(sounds).map(([id, sound]) => `<option value="${id}"${id === playSettings.melodySound ? ' selected' : ''}>${sound.label}</option>`).join('')}</select>` : ''}
+                    <input class="vslider" type="range" min="0" max="100" value="${playSettings[volumeKey]}" oninput="layerVolume('${kind}', this.value)" aria-label="${label} volume" title="${label} volume">
+                </span>`;
             return `
                 <div class="player">
-                    <div class="player-main">
+                    <span class="player-group">
                         <button class="small-btn play-btn" id="playBtn" onclick="togglePlay('${tune.id}')" aria-label="${playing ? 'Stop' : 'Play the dots'}">${playing ? '■ Stop' : '▶ Play'}</button>
-                        <label class="tempo">
-                            <input type="range" min="40" max="240" step="2" value="${tempoOf(tune)}" oninput="tempoChanged('${tune.id}', this.value)" aria-label="Speed in beats a minute">
-                            <span id="tempoLabel">${tempoOf(tune)}</span>&nbsp;bpm
-                        </label>
-                    </div>
-                    ${layer('melody', 'Melody', SOUNDS, 'melodySound', 'melodyVolume')}
-                    ${chart && chart.parts.length ? layer('chords', 'Chords', CHORD_SOUNDS, 'chordSound', 'chordVolume') : ''}
+                        <input class="vslider" type="range" min="40" max="240" step="2" value="${tempoOf(tune)}" oninput="tempoChanged('${tune.id}', this.value)" aria-label="Speed in beats a minute" title="Speed">
+                        <span class="tempo-label"><span id="tempoLabel">${tempoOf(tune)}</span><br>bpm</span>
+                    </span>
+                    ${layer('melody', 'Melody', 'melodyVolume', SOUNDS)}
+                    ${chart && chart.parts.length ? layer('chords', 'Chords', 'chordVolume') : ''}
                 </div>`;
         }
 
@@ -2882,10 +2873,10 @@
             if (player) setLevel(player, kind);
         }
 
-        // A new sound mid-tune replaces that layer only
-        function layerSound(kind, id) {
-            if (kind === 'melody') playSettings.melodySound = SOUNDS[id] ? id : 'fiddle';
-            else playSettings.chordSound = CHORD_SOUNDS[id] ? id : 'piano';
+        // A new melody sound mid-tune replaces the melody only
+        function layerSound(id) {
+            const kind = 'melody';
+            playSettings.melodySound = SOUNDS[id] ? id : 'fiddle';
             savePlaySettings();
             if (!player || !player.layers[kind]) return;
             const old = player.layers[kind];
@@ -2992,13 +2983,12 @@
             const synth = new window.ABCJS.synth.CreateSynth();
             const msPerBar = me.visual.millisecondsPerMeasure(me.bpm);
             const melody = SOUNDS[playSettings.melodySound];
-            const chords = CHORD_SOUNDS[playSettings.chordSound];
             const options = kind === 'melody'
                 ? { soundFontUrl: SOUNDFONT, program: melody.program, chordsOff: true,
                     fadeLength: Math.max(40, Math.round((1 - melody.hold) * msPerBar / barLength(me.element.drawnAbc) / 8)),
                     sequenceCallback: tracks => articulate(tracks, melody.hold) }
                 // The chords layer leaves out the tune itself
-                : { soundFontUrl: SOUNDFONT, program: 0, chordprog: chords.program, bassprog: chords.program, chordvol: 64, bassvol: 72,
+                : { soundFontUrl: SOUNDFONT, program: 0, chordprog: 0, bassprog: 0, chordvol: 64, bassvol: 72,
                     sequenceCallback: tracks => (tracks[0] || []).forEach(note => { note.volume = 0; }) };
             const made = synth.init({
                 audioContext: me.audioContext,
@@ -3161,7 +3151,8 @@
                 ${chordChartHtml(tune)}
                 ${source ? `
                     <div class="music-tools">
-                        ${sources.length > 1 ? `<div class="style-chips">${sources.map((x, i) => `<button class="chip style-chip${i === pageSource ? ' selected' : ''}" style="--accent: var(--woad)" onclick="showPageSource(${i})">${preferred && x.key === preferred.key ? '★ ' : ''}${x.label}</button>`).join('')}</div>` : '<span></span>'}
+                        ${sources.length > 1 ? `<div class="style-chips">${sources.map((x, i) => `<button class="chip style-chip${i === pageSource ? ' selected' : ''}" style="--accent: var(--woad)" onclick="showPageSource(${i})">${preferred && x.key === preferred.key ? '★ ' : ''}${x.label}</button>`).join('')}</div>` : ''}
+                        ${source.kind === 'abc' && !(noteEdit && noteEdit.tuneId === tune.id && noteEdit.link === source.link) ? playerHtml(tune) : '<span></span>'}
                         ${source.kind === 'abc' ? `<div class="zoom">
                             <button class="small-btn" onclick="shiftDots('${tune.id}', -1)" aria-label="Transpose the dots down a half step">♭</button>
                             <button class="small-btn" onclick="shiftDots('${tune.id}', 1)" aria-label="Transpose the dots up a half step">♯</button>
@@ -3176,7 +3167,7 @@
                     ${source.kind === 'abc' && noteEdit && noteEdit.tuneId === tune.id && noteEdit.link === source.link
                         ? noteEditHtml(tune)
                         : source.kind === 'abc'
-                        ? `${playerHtml(tune)}<div class="page-music" data-music="${tune.id}" data-link="${source.link}"></div>
+                        ? `<div class="page-music" data-music="${tune.id}" data-link="${source.link}"></div>
                             <p class="prefer-note note-change"><button class="link-btn" onclick="startNoteEdit('${tune.id}', ${source.link})">✎ Change notes</button>${tune.links[source.link].edited
                                 ? ` · You've changed some notes. <button class="link-btn" onclick="restoreOriginalNotes('${tune.id}', ${source.link})">put back the original</button>` : ''}</p>`
                         : `<img class="page-photo" data-photo="${source.id}" alt="Sheet music for ${escapeHTML(tune.name)}">`}`
