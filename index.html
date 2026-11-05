@@ -958,6 +958,10 @@
             margin: 0;
         }
 
+        .music-tools .player {
+            flex: 1 1 auto;
+        }
+
         .player-group {
             display: inline-flex;
             align-items: center;
@@ -975,11 +979,16 @@
             cursor: pointer;
         }
 
-        .play-sound {
-            width: auto;
-            flex: 0 0 auto;
-            padding: 5px 28px 5px 8px;
-            font-size: 14px;
+        /* Speed gets the room: a full-size slider that takes what the line has spare */
+        .player-speed {
+            flex: 1 1 260px;
+        }
+
+        .tempo-slider {
+            flex: 1;
+            min-width: 100px;
+            accent-color: var(--woad);
+            cursor: pointer;
         }
 
         .play-btn {
@@ -991,8 +1000,7 @@
             font-size: 13px;
             line-height: 1.1;
             color: var(--muted);
-            text-align: center;
-            min-width: 30px;
+            white-space: nowrap;
         }
 
         .page-music .playing {
@@ -2777,7 +2785,7 @@
         // abcjs turns the drawn tune into sound and says when each note sounds, so the note
         // playing lights up. Melody and chords are two layers, each its own abcjs synth started
         // at the same moment and each through its own volume, so either can come in or drop out
-        // (or change sound) mid-tune without the other stopping. The chords are the dots' own
+        // mid-tune without the other stopping. The chords are the dots' own
         // chord symbols, or your chart's when the dots have none. Melody notes hold for part of
         // their length, then fade to nothing by the next note: the rhythm comes through without
         // the notes stopping dead. The sounds come note by note from abcjs's sound library
@@ -2789,12 +2797,11 @@
         const TEMPO_KEY = 'tunesTempo';
         const PLAYER_KEY = 'tunesPlayer';
         const LEARNING_TEMPO = { reel: 160, breakdown: 160, hornpipe: 140, strathspey: 110, march: 110, barndance: 150, schottische: 140, rag: 150, jig: 90, 'slip jig': 90, slide: 110, polka: 160, waltz: 120, mazurka: 120, 'three-two': 160 };
-        // program: General MIDI instrument; hold: how much of an eighth note sounds at full
+        // The melody is a fiddle (General MIDI 40). hold: how much of an eighth note sounds at full
         // volume before fading out (longer notes hold longer, and fade over the same time)
-        const SOUNDS = { fiddle: { label: 'Fiddle', program: 40, hold: 0.6 }, piano: { label: 'Piano', program: 0, hold: 0.8 }, banjo: { label: 'Banjo', program: 105, hold: 0.85 } };
+        const MELODY = { program: 40, hold: 0.6 };
         const playerPrefs = load(TEMPO_KEY, {});
-        const playSettings = { melodySound: load('tunesSound', 'fiddle'), melodyVolume: 80, chordVolume: 60, ...load(PLAYER_KEY, {}) };
-        if (!SOUNDS[playSettings.melodySound]) playSettings.melodySound = 'fiddle';
+        const playSettings = { melodyVolume: 80, chordVolume: 60, ...load(PLAYER_KEY, {}) };
         const layerOn = { melody: true, chords: false };
         let player = null;  // { tuneId, element, visual, audioContext, gains, layers, startAt, timer, lit }
 
@@ -2809,20 +2816,19 @@
         function playerHtml(tune) {
             const playing = player && player.tuneId === tune.id;
             const chart = chartFor(tune);
-            const layer = (kind, label, volumeKey, sounds) => `
+            const layer = (kind, label, volumeKey) => `
                 <span class="player-group">
                     <button class="chip style-chip${layerOn[kind] ? ' selected' : ''}" id="layer-${kind}" style="--accent: var(--woad)" onclick="toggleLayer('${kind}')" aria-pressed="${layerOn[kind]}">${label}</button>
-                    ${sounds ? `<select class="play-sound" onchange="layerSound(this.value)" aria-label="${label} sound">${Object.entries(sounds).map(([id, sound]) => `<option value="${id}"${id === playSettings.melodySound ? ' selected' : ''}>${sound.label}</option>`).join('')}</select>` : ''}
                     <input class="vslider" type="range" min="0" max="100" value="${playSettings[volumeKey]}" oninput="layerVolume('${kind}', this.value)" aria-label="${label} volume" title="${label} volume">
                 </span>`;
             return `
                 <div class="player">
-                    <span class="player-group">
+                    <span class="player-group player-speed">
                         <button class="small-btn play-btn" id="playBtn" onclick="togglePlay('${tune.id}')" aria-label="${playing ? 'Stop' : 'Play the dots'}">${playing ? '■ Stop' : '▶ Play'}</button>
-                        <input class="vslider" type="range" min="40" max="240" step="2" value="${tempoOf(tune)}" oninput="tempoChanged('${tune.id}', this.value)" aria-label="Speed in beats a minute" title="Speed">
-                        <span class="tempo-label"><span id="tempoLabel">${tempoOf(tune)}</span><br>bpm</span>
+                        <input class="tempo-slider" type="range" min="40" max="240" step="2" value="${tempoOf(tune)}" oninput="tempoChanged('${tune.id}', this.value)" aria-label="Speed in beats a minute" title="Speed">
+                        <span class="tempo-label"><span id="tempoLabel">${tempoOf(tune)}</span>&nbsp;bpm</span>
                     </span>
-                    ${layer('melody', 'Melody', 'melodyVolume', SOUNDS)}
+                    ${layer('melody', 'Melody', 'melodyVolume')}
                     ${chart && chart.parts.length ? layer('chords', 'Chords', 'chordVolume') : ''}
                 </div>`;
         }
@@ -2871,18 +2877,6 @@
             playSettings[kind === 'melody' ? 'melodyVolume' : 'chordVolume'] = Number(value);
             savePlaySettings();
             if (player) setLevel(player, kind);
-        }
-
-        // A new melody sound mid-tune replaces the melody only
-        function layerSound(id) {
-            const kind = 'melody';
-            playSettings.melodySound = SOUNDS[id] ? id : 'fiddle';
-            savePlaySettings();
-            if (!player || !player.layers[kind]) return;
-            const old = player.layers[kind];
-            delete player.layers[kind];
-            old.then(synth => { try { synth.stop(); } catch (e) {} }).catch(() => {});
-            if (layerOn[kind]) addLayer(player, kind);
         }
 
         // The chart's chords written into the dots' bars, one per beat where they change, for
@@ -2982,7 +2976,7 @@
             const tune = tunes.find(t => t.id === me.tuneId);
             const synth = new window.ABCJS.synth.CreateSynth();
             const msPerBar = me.visual.millisecondsPerMeasure(me.bpm);
-            const melody = SOUNDS[playSettings.melodySound];
+            const melody = MELODY;
             const options = kind === 'melody'
                 ? { soundFontUrl: SOUNDFONT, program: melody.program, chordsOff: true,
                     fadeLength: Math.max(40, Math.round((1 - melody.hold) * msPerBar / barLength(me.element.drawnAbc) / 8)),
