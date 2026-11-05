@@ -2777,7 +2777,6 @@
         const playerPrefs = load(TEMPO_KEY, {});
         let playSound = SOUNDS[load(SOUND_KEY, 'fiddle')] ? load(SOUND_KEY, 'fiddle') : 'fiddle';
         let player = null;  // { element, synth, timer, tuneId, lit }
-        let playLoop = false;
         let playChords = true;
 
         function tempoOf(tune) {
@@ -2796,7 +2795,6 @@
                         <span id="tempoLabel">${tempoOf(tune)}</span>&nbsp;bpm
                     </label>
                     <select class="play-sound" onchange="soundChosen('${tune.id}', this.value)" aria-label="Sound">${Object.entries(SOUNDS).map(([id, sound]) => `<option value="${id}"${id === playSound ? ' selected' : ''}>${sound.label}</option>`).join('')}</select>
-                    <button class="chip style-chip${playLoop ? ' selected' : ''}" style="--accent: var(--woad)" onclick="playLoop = !playLoop; this.classList.toggle('selected', playLoop)" aria-pressed="${playLoop}" title="Play it over and over until you tap Stop">↻ Repeat</button>
                     ${chords ? `<button class="chip style-chip${playChords ? ' selected' : ''}" style="--accent: var(--woad)" onclick="toggleBacking('${tune.id}', this)" aria-pressed="${playChords}">Chords</button>` : ''}
                 </div>`;
         }
@@ -2947,16 +2945,8 @@
             me.lit = [];
             if (player !== me) return;
             if (!event) {
-                // The end: round again, or stop
-                if (playLoop) {
-                    me.synth.stop();
-                    me.timer.stop();
-                    me.timer.reset();
-                    me.synth.start();
-                    me.timer.start();
-                } else {
-                    stopPlayer();
-                }
+                // The end
+                stopPlayer();
                 return 'continue';
             }
             me.lit = (event.elements || []).flat();
