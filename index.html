@@ -2773,11 +2773,11 @@
         const LEARNING_TEMPO = { reel: 160, breakdown: 160, hornpipe: 140, strathspey: 110, march: 110, barndance: 150, schottische: 140, rag: 150, jig: 90, 'slip jig': 90, slide: 110, polka: 160, waltz: 120, mazurka: 120, 'three-two': 160 };
         const SOUND_KEY = 'tunesSound';
         // program: General MIDI instrument; length: how much of each note sounds (the rest is a gap)
-        const SOUNDS = { fiddle: { label: 'Fiddle', program: 40, length: 0.62 }, piano: { label: 'Piano', program: 0, length: 0.85 }, banjo: { label: 'Banjo', program: 105, length: 0.9 } };
+        const SOUNDS = { fiddle: { label: 'Fiddle', program: 40, length: 0.75 }, piano: { label: 'Piano', program: 0, length: 0.85 }, banjo: { label: 'Banjo', program: 105, length: 0.9 } };
         const playerPrefs = load(TEMPO_KEY, {});
         let playSound = SOUNDS[load(SOUND_KEY, 'fiddle')] ? load(SOUND_KEY, 'fiddle') : 'fiddle';
         let player = null;  // { element, synth, timer, tuneId, lit }
-        let playChords = true;
+        let playChords = false;
 
         function tempoOf(tune) {
             return playerPrefs[tune.id] || LEARNING_TEMPO[tune.type] || 120;
