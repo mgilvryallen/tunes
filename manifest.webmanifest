@@ -1,7 +1,7 @@
 {
   "name": "Tunes",
   "short_name": "Tunes",
-  "description": "A tunebook for fiddlers: keys, tunings, styles, and the dots from The Session.",
+  "description": "A tunebook for the tunes you know and the ones you're learning: old-time, Irish, Scottish, Québécois. Sheet music and chords from The Session, sets, and a drone in the right key.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
