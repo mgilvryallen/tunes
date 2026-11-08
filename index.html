@@ -11,8 +11,10 @@
     <meta name="apple-mobile-web-app-title" content="Tunes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <link rel="manifest" href="manifest.webmanifest">
-    <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
-    <link rel="apple-touch-icon" href="icons/icon-180.png">
+    <!-- A PNG too: Safari's tabs don't show an SVG icon, and would show another app's instead -->
+    <link rel="icon" href="icons/icon-192.png?v=2" type="image/png" sizes="192x192">
+    <link rel="icon" href="icons/icon.svg?v=2" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="icons/icon-180.png?v=2">
     <style>
         @font-face {
             font-family: 'Rug Pull';
